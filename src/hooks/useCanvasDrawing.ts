@@ -7,8 +7,10 @@ import { compositeLayers, getPixelColor, drawPixel, clearPixel, drawLine,
     getPixelFromImageData,
     setPixelInImageData,
     areColorsEqual,
+    drawCheckerboard
  } from '../utils/canvasUtils';
 
+// testing i made a change to see if it works
 import type {RgbaPixel} from '../utils/colorUtils';
 
 interface UseCanvasDrawingProps {
@@ -359,30 +361,58 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
   }, [canvasRef, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerLeave]);
 
 
-   // Effect to redraw the main canvas when state changes
-   useEffect(() => {
+  // --- MODIFIED Effect to redraw the main canvas ---
+  useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
-    if (ctx && canvasWidth > 0 && canvasHeight > 0) {
-        canvas.width = canvasWidth * zoomLevel;
-        canvas.height = canvasHeight * zoomLevel;
 
-        const isActiveLayerLocked = layers.find(l => l.id === activeLayerId)?.isLocked ?? false;
-        if (isActiveLayerLocked && selectedTool !== 'eyedropper') { // Allow eyedropper even if locked
-            canvas.style.cursor = 'not-allowed';
-        } else {
-            switch (selectedTool) {
-                case 'pencil': canvas.style.cursor = 'crosshair'; break;
-                case 'eraser': canvas.style.cursor = 'crosshair'; break;
-                case 'eyedropper': canvas.style.cursor = 'copy'; break;
-                case 'fill': canvas.style.cursor = 'crosshair'; break; // Or 'url(/path/to/bucket.cur), auto'
-                default: canvas.style.cursor = 'default';
-            }
-        }
-
-        compositeLayers(ctx, layers, canvasWidth, canvasHeight, zoomLevel);
+    if (!ctx || !canvas || canvasWidth <= 0 || canvasHeight <= 0) {
+        return; // Exit if canvas context or dimensions aren't ready
     }
-  }, [canvasRef, layers, canvasWidth, canvasHeight, zoomLevel, activeLayerId, selectedTool]); // Add selectedTool dependency for cursor updates
+
+    // --- Find the currently active layer ---
+    const currentActiveLayer = layers.find(l => l.id === activeLayerId);
+
+    // --- Resize visible canvas based on zoom ---
+    canvas.width = canvasWidth * zoomLevel;
+    canvas.height = canvasHeight * zoomLevel;
+    ctx.imageSmoothingEnabled = false; // Ensure crisp rendering after resize
+
+    // --- Set cursor based on tool and lock status ---
+    const isActiveLayerLocked = currentActiveLayer?.isLocked ?? false;
+    if (isActiveLayerLocked && selectedTool !== 'eyedropper') {
+        canvas.style.cursor = 'not-allowed';
+    } else {
+        switch (selectedTool) {
+            case 'pencil': canvas.style.cursor = 'crosshair'; break;
+            case 'eraser': canvas.style.cursor = 'crosshair'; break;
+            case 'eyedropper': canvas.style.cursor = 'copy'; break;
+            case 'fill': canvas.style.cursor = 'crosshair'; break; // Or bucket cursor
+            default: canvas.style.cursor = 'default';
+        }
+    }
+
+    // --- Clear the main canvas and draw checkerboard ---
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawCheckerboard(ctx, canvas.width, canvas.height);
+
+    // --- Draw ONLY the active layer's offscreen canvas ---
+    if (currentActiveLayer && currentActiveLayer.offscreenCanvas) {
+        // Draw the layer scaled by zoomLevel
+        ctx.drawImage(
+            currentActiveLayer.offscreenCanvas,
+            0, // No offset needed for main canvas view
+            0, // No offset needed for main canvas view
+            canvas.width, // Draw at the full zoomed size
+            canvas.height // Draw at the full zoomed size
+        );
+    } else {
+        // Optional: Draw something else if no layer is active or canvas is missing
+        // console.log("No active layer canvas to draw.");
+    }
+
+    // Dependencies: Redraw when active layer changes, layers array changes (to find active layer),
+    // dimensions change, or zoom changes. Also selectedTool for cursor.
+  }, [canvasRef, layers, activeLayerId, canvasWidth, canvasHeight, zoomLevel, selectedTool]);
+
 } // End of useCanvasDrawing hook
-  // Return any values/functions needed by the component (optional)
-  // return { getLogicalCoords };
