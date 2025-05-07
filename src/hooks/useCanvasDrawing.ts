@@ -1,5 +1,5 @@
 // src/hooks/useCanvasDrawing.ts
-import { useRef, useEffect, useCallback, useState } from 'react'; // Import useState
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { useAppContext } from '../state/AppContext';
 import type { Layer, Tool } from '../state/types'; // Use type import
 import { parseColor } from '../utils/colorUtils';
@@ -20,28 +20,28 @@ interface UseCanvasDrawingProps {
   containerRef: React.RefObject<HTMLDivElement>;
 }
 
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 32;
+const ZOOM_SENSITIVITY = 0.0025;
+
 export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingProps) {
   const { state, dispatch } = useAppContext();
   const {
     canvasWidth,
     canvasHeight,
-    layers, // The full layers array [Top, ..., Bottom]
-    activeLayerId,
+    layers,
+    activeLayerId, // Will be used to determine starting point for eyedropper
     selectedTool,
     primaryColor,
     zoomLevel,
   } = state;
 
-  // --- State to trigger redraws during drag ---
   const [redrawNonce, setRedrawNonce] = useState(0);
-  // ---
-
   const isDrawing = useRef(false);
   const lastPoint = useRef<{ x: number; y: number } | null>(null);
   const activeLayerCache = useRef<Layer | null>(null);
   const activeCtxCache = useRef<CanvasRenderingContext2D | null>(null);
 
-  // Effect to update cached layer and context (remains same)
   useEffect(() => {
       activeLayerCache.current = layers.find(l => l.id === activeLayerId) || null;
       activeCtxCache.current = activeLayerCache.current?.offscreenCanvas?.getContext('2d') || null;
@@ -50,8 +50,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
       }
   }, [activeLayerId, layers]);
 
-  // getLogicalCoords (remains same)
-   const getLogicalCoords = useCallback((event: PointerEvent): { x: number; y: number } | null => {
+   const getLogicalCoords = useCallback((event: PointerEvent | WheelEvent): { x: number; y: number } | null => {
         const canvas = canvasRef.current;
         if (!canvas) return null;
         const rect = canvas.getBoundingClientRect();
@@ -65,7 +64,6 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         return null;
     }, [canvasRef, zoomLevel, canvasWidth, canvasHeight]);
 
-  // pencilDraw, eraserDraw (remain same)
   const pencilDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string) => {
         drawLine(ctx, x0, y0, x1, y1, color, drawPixel);
     }, []);
@@ -74,21 +72,42 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         drawLine(ctx, x0, y0, x1, y1, 'transparent', clearFunc);
     }, []);
 
-  // eyedropperSample (remains same)
+  // --- Modified eyedropperSample ---
   const eyedropperSample = useCallback((logicalCoords: { x: number; y: number }) => {
-        for (let i = 0; i < layers.length; i++) {
+        console.log(`Eyedropper: Sampling at logical coordinates (${logicalCoords.x}, ${logicalCoords.y})`);
+
+        // Find the index of the active layer
+        const activeLayerIndex = layers.findIndex(layer => layer.id === activeLayerId);
+
+        if (activeLayerIndex === -1) {
+            console.log("Eyedropper: No active layer found. Cannot sample.");
+            return; // Should not happen if a layer is always active
+        }
+
+        // Iterate from the active layer downwards (towards higher indices)
+        for (let i = activeLayerIndex; i < layers.length; i++) {
             const layer = layers[i];
+            console.log(`Eyedropper: Checking layer "${layer.name}" (ID: ${layer.id}, Index: ${i}), Visible: ${layer.isVisible}`);
+
             if (layer.isVisible && layer.offscreenCanvas) {
                 const ctx = layer.offscreenCanvas.getContext('2d');
                 if (ctx) {
                     const color = getPixelColor(ctx, logicalCoords.x, logicalCoords.y);
-                    if (color) { dispatch({ type: 'SET_PRIMARY_COLOR', color }); return; }
+                    console.log(`Eyedropper: Color sampled from "${layer.name}":`, color);
+                    if (color) { // Found first non-transparent pixel
+                        console.log(`Eyedropper: Dispatching SET_PRIMARY_COLOR with ${color}`);
+                        dispatch({ type: 'SET_PRIMARY_COLOR', color });
+                        return; // Stop sampling
+                    }
+                } else {
+                    console.log(`Eyedropper: Could not get context for layer "${layer.name}"`);
                 }
             }
         }
-    }, [layers, dispatch]);
+        console.log("Eyedropper: No color found at coordinates from active layer downwards (all relevant layers transparent or invisible).");
+    }, [layers, dispatch, activeLayerId]); // Added activeLayerId dependency
+  // --- End Modified eyedropperSample ---
 
-  // floodFill (remains same)
   const floodFill = useCallback((startX: number, startY: number) => {
     const ctx = activeCtxCache.current;
     const layer = activeLayerCache.current;
@@ -116,12 +135,11 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     const updatedCanvas = layer.offscreenCanvas;
     if (updatedCanvas) {
         dispatch({ type: 'UPDATE_LAYER_CANVAS', id: layer.id, canvas: updatedCanvas, dataURL: updatedCanvas.toDataURL() });
-        setRedrawNonce(n => n + 1); // Trigger redraw after fill
+        setRedrawNonce(n => n + 1);
     }
   }, [activeCtxCache, activeLayerCache, canvasWidth, canvasHeight, primaryColor, dispatch, state.isInitialized]);
 
 
-  // --- Event Handlers ---
   const handlePointerDown = useCallback((event: PointerEvent) => {
     if (event.button !== 0) return;
     const coords = getLogicalCoords(event);
@@ -131,21 +149,17 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     if (!ctx) return;
     event.preventDefault();
 
-    // Reset nonce at the beginning of a potential draw/fill action
-    // setRedrawNonce(0); // Optional: reset here if needed
-
     switch (selectedTool) {
         case 'pencil':
         case 'eraser':
             isDrawing.current = true;
             lastPoint.current = coords;
-            ctx.save(); // Save context state for potential restore on pointer up/leave
+            ctx.save();
             if (selectedTool === 'pencil') {
                 drawPixel(ctx, coords.x, coords.y, primaryColor);
             } else {
                 clearPixel(ctx, coords.x, coords.y);
             }
-            // Trigger initial redraw for the first pixel
             setRedrawNonce(n => n + 1);
             break;
         case 'eyedropper':
@@ -154,40 +168,32 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             break;
         case 'fill':
             isDrawing.current = false;
-            floodFill(coords.x, coords.y); // floodFill now triggers its own redraw
+            floodFill(coords.x, coords.y);
             break;
     }
   }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, eyedropperSample, floodFill]);
 
   const handlePointerMove = useCallback((event: PointerEvent) => {
-      // Only run if drawing (pencil/eraser) and mouse button is down
       if (!isDrawing.current || !lastPoint.current || selectedTool === 'fill' || selectedTool === 'eyedropper') return;
-
       const coords = getLogicalCoords(event);
       const currentLayer = activeLayerCache.current;
-
-      // Stop drawing if moving outside bounds or onto a locked layer
       if (!coords || !currentLayer || currentLayer.isLocked) {
-          if (isDrawing.current) { // Check if we were drawing before leaving
+          if (isDrawing.current) {
               isDrawing.current = false;
               lastPoint.current = null;
               if (activeCtxCache.current && (selectedTool === 'pencil' || selectedTool === 'eraser')) {
-                  activeCtxCache.current.restore(); // Restore context state
+                  activeCtxCache.current.restore();
                   const updatedCanvas = currentLayer?.offscreenCanvas;
-                  // Final update dispatch on leaving bounds while drawing
                   if (updatedCanvas && currentLayer) {
                       dispatch({ type: 'UPDATE_LAYER_CANVAS', id: currentLayer.id, canvas: updatedCanvas, dataURL: updatedCanvas.toDataURL() });
-                      setRedrawNonce(n => n + 1); // Trigger final redraw
+                      setRedrawNonce(n => n + 1);
                   }
               }
           }
           return;
       }
-
       const ctx = activeCtxCache.current;
       if (!ctx) return;
-
-      // Draw line segment if logical coordinates changed
       if (coords.x !== lastPoint.current.x || coords.y !== lastPoint.current.y) {
         switch (selectedTool) {
           case 'pencil':
@@ -197,76 +203,74 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
               eraserDraw(ctx, lastPoint.current.x, lastPoint.current.y, coords.x, coords.y);
               break;
         }
-        lastPoint.current = coords; // Update last point
-
-        // --- Trigger redraw after drawing segment ---
+        lastPoint.current = coords;
         setRedrawNonce(n => n + 1);
-        // ---
       }
-  }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, dispatch, pencilDraw, eraserDraw]); // Added pencilDraw/eraserDraw deps
+  }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, dispatch, pencilDraw, eraserDraw]);
 
-  // Shared logic for pointer up / leave
   const finalizeDrawing = useCallback(() => {
     if (isDrawing.current && (selectedTool === 'pencil' || selectedTool === 'eraser')) {
         isDrawing.current = false;
         lastPoint.current = null;
         const currentLayer = activeLayerCache.current;
         if (currentLayer && activeCtxCache.current) {
-            activeCtxCache.current.restore(); // Restore context state saved on pointer down
+            activeCtxCache.current.restore();
             const updatedCanvas = currentLayer.offscreenCanvas;
             if (updatedCanvas) {
-                // Dispatch final update with dataURL for persistence
                 dispatch({
                     type: 'UPDATE_LAYER_CANVAS',
                     id: currentLayer.id,
                     canvas: updatedCanvas,
                     dataURL: updatedCanvas.toDataURL()
                 });
-                // Trigger one last redraw to ensure final state is shown
                 setRedrawNonce(n => n + 1);
             }
         }
     } else {
-        // Ensure drawing state is reset even if not pencil/eraser
         isDrawing.current = false;
         lastPoint.current = null;
     }
   }, [dispatch, activeLayerCache, activeCtxCache, selectedTool]);
 
-
   const handlePointerUp = useCallback((event: PointerEvent) => {
-    if (event.button !== 0) return; // Only handle left button release
+    if (event.button !== 0) return;
     finalizeDrawing();
   }, [finalizeDrawing]);
 
  const handlePointerLeave = useCallback((event: PointerEvent) => {
-     // Finalize if leaving the canvas while the button was down
      if (isDrawing.current) {
          finalizeDrawing();
      }
   }, [finalizeDrawing]);
 
-  // Effect for attaching listeners (remains same)
+  const handleWheelZoom = useCallback((event: WheelEvent) => {
+    event.preventDefault();
+    const zoomFactor = 1 - event.deltaY * ZOOM_SENSITIVITY;
+    let newZoomLevel = zoomLevel * zoomFactor;
+    newZoomLevel = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomLevel));
+    dispatch({ type: 'SET_ZOOM_LEVEL', level: newZoomLevel });
+  }, [zoomLevel, dispatch]);
+
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Use capture phase for pointer leave to catch it more reliably if pointer moves fast
     canvas.addEventListener('pointerdown', handlePointerDown);
     canvas.addEventListener('pointermove', handlePointerMove);
     canvas.addEventListener('pointerup', handlePointerUp);
-    canvas.addEventListener('pointerleave', handlePointerLeave, { capture: true }); // Use capture
+    canvas.addEventListener('pointerleave', handlePointerLeave, { capture: true });
+    canvas.addEventListener('wheel', handleWheelZoom, { passive: false });
     return () => {
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('pointermove', handlePointerMove);
       canvas.removeEventListener('pointerup', handlePointerUp);
-      canvas.removeEventListener('pointerleave', handlePointerLeave, { capture: true }); // Use capture
+      canvas.removeEventListener('pointerleave', handlePointerLeave, { capture: true });
+      canvas.removeEventListener('wheel', handleWheelZoom);
     };
-  }, [canvasRef, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerLeave]);
+  }, [canvasRef, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerLeave, handleWheelZoom]);
 
 
-  // --- MODIFIED Effect to redraw the main canvas ---
   useEffect(() => {
-    // console.log("Redraw Effect Triggered - Nonce:", redrawNonce); // Debug log
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
 
@@ -310,8 +314,6 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         }
         ctx.globalAlpha = 1.0;
     }
-
-    // Add redrawNonce to dependencies to trigger redraw when it changes
   }, [canvasRef, layers, activeLayerId, canvasWidth, canvasHeight, zoomLevel, selectedTool, redrawNonce]);
 
-} // End of useCanvasDrawing hook
+}
