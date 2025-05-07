@@ -1,25 +1,23 @@
 // src/hooks/useLayerManager.ts
 import { Reducer } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { AppState, Layer, LayerAction, Tool, LayerDataForHistory } from '../state/types'; // Use type import
+import type { AppState, Layer, LayerAction, Tool, LayerDataForHistory, ClipboardLayerData } from '../state/types';
 import { createOffscreenCanvas } from '../utils/canvasUtils';
 
-const MAX_HISTORY_SIZE = 50; // Max number of undo steps
+const MAX_HISTORY_SIZE = 50;
 
-// Helper to serialize layers for history
 export const serializeLayersForHistory = (layers: Layer[]): LayerDataForHistory[] => {
     return layers.map(({ offscreenCanvas, ...rest }) => {
-        // Ensure dataURL is current if offscreenCanvas exists, otherwise use existing dataURL
         const currentDataURL = offscreenCanvas ? offscreenCanvas.toDataURL() : rest.dataURL;
         return { ...rest, dataURL: currentDataURL };
     });
 };
 
-// Helper to create an initial history entry
 const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => {
     return [serializeLayersForHistory(layers)];
 };
 
+const DEFAULT_CAMERA_PITCH = -35.2644; // Default if using camera pitch feature
 
 export const initialAppState: AppState = {
   isInitialized: false,
@@ -30,36 +28,29 @@ export const initialAppState: AppState = {
   selectedTool: 'pencil',
   primaryColor: '#000000ff',
   zoomLevel: 4,
-  previewOffset: { x: 1, y: 1 },
+  previewOffset: { x: 0, y: 1.5 },
   previewRotation: 0,
   isColorPickerOpen: false,
-  // --- Undo/Redo Initial State ---
   history: [],
-  historyIndex: -1, // No history initially
+  historyIndex: -1,
+  cameraPitch: DEFAULT_CAMERA_PITCH,
+  clipboard: null,
 };
 
-// Function to add current state to history before a modification
 const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHistory[]): Pick<AppState, 'history' | 'historyIndex'> => {
     let newHistory = [...currentState.history];
     let newHistoryIndex = currentState.historyIndex;
-
-    // If we have undone, and now make a new change, clear the "redo" stack
     if (newHistoryIndex < newHistory.length - 1) {
         newHistory = newHistory.slice(0, newHistoryIndex + 1);
     }
-
-    // Add the new state
     newHistory.push(newLayersSnapshot);
     newHistoryIndex++;
-
-    // Cap history size
     if (newHistory.length > MAX_HISTORY_SIZE) {
-        newHistory.shift(); // Remove the oldest entry
-        newHistoryIndex--;   // Adjust index accordingly
+        newHistory.shift();
+        newHistoryIndex--;
     }
     return { history: newHistory, historyIndex: newHistoryIndex };
 };
-
 
 export const layerReducer: Reducer<AppState, LayerAction> = (state, action): AppState => {
   switch (action.type) {
@@ -69,26 +60,17 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
       for (let i = 0; i < layerCount; i++) {
         const newCanvas = createOffscreenCanvas(width, height);
         initialLayers.push({
-          id: uuidv4(),
-          name: `Layer ${i + 1}`,
-          isVisible: true,
-          isLocked: false,
-          opacity: 1.0,
-          offscreenCanvas: newCanvas,
-          dataURL: newCanvas.toDataURL(),
+          id: uuidv4(), name: `Layer ${i + 1}`, isVisible: true, isLocked: false, opacity: 1.0,
+          offscreenCanvas: newCanvas, dataURL: newCanvas.toDataURL(),
         });
       }
-      const reversedInitialLayers = initialLayers.reverse(); // Layer 1 on top
+      const reversedInitialLayers = initialLayers.reverse();
       return {
         ...initialAppState,
-        isInitialized: true,
-        canvasWidth: width,
-        canvasHeight: height,
-        layers: reversedInitialLayers,
+        isInitialized: true, canvasWidth: width, canvasHeight: height, layers: reversedInitialLayers,
         activeLayerId: reversedInitialLayers[0]?.id || null,
         zoomLevel: calculateInitialZoom(width, height),
-        history: createInitialHistoryEntry(reversedInitialLayers),
-        historyIndex: 0,
+        history: createInitialHistoryEntry(reversedInitialLayers), historyIndex: 0,
       };
     }
 
@@ -96,42 +78,30 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const loadedState = action.state;
         let reconstructedLayers: Layer[] = [];
         if (loadedState.layers && loadedState.canvasWidth && loadedState.canvasHeight) {
-            reconstructedLayers = loadedState.layers.map(layerData => {
-                const canvas = createOffscreenCanvas(loadedState.canvasWidth!, loadedState.canvasHeight!);
-                // Note: Actual drawing from dataURL will be handled by hydration effect in App.tsx
-                return {
-                    ...layerData,
-                    offscreenCanvas: canvas, // Fresh canvas, needs hydration
-                } as Layer; // Assert type
-            });
+            reconstructedLayers = loadedState.layers.map(layerData => ({
+                ...layerData,
+                offscreenCanvas: createOffscreenCanvas(loadedState.canvasWidth!, loadedState.canvasHeight!),
+            } as Layer));
         }
-
-        // If history is provided in loadedState, use it, otherwise create from current layers
         const historyFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.history
-            : createInitialHistoryEntry(reconstructedLayers);
+            ? loadedState.history : createInitialHistoryEntry(reconstructedLayers);
         const historyIndexFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.historyIndex
-            : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
-
-
+            ? loadedState.historyIndex : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
         return {
-            ...initialAppState,
-            ...loadedState,
-            layers: reconstructedLayers,
-            isInitialized: true,
+            ...initialAppState, ...loadedState, layers: reconstructedLayers, isInitialized: true,
             canvasWidth: loadedState.canvasWidth ?? initialAppState.canvasWidth,
             canvasHeight: loadedState.canvasHeight ?? initialAppState.canvasHeight,
             activeLayerId: loadedState.activeLayerId ?? reconstructedLayers[0]?.id ?? null,
-            history: historyFromLoad as LayerDataForHistory[][], // Cast if loaded
+            history: historyFromLoad as LayerDataForHistory[][],
             historyIndex: historyIndexFromLoad,
+            cameraPitch: loadedState.cameraPitch ?? initialAppState.cameraPitch,
+            clipboard: loadedState.clipboard ?? null,
         };
     }
 
     case 'ADD_LAYER': {
       if (!state.isInitialized) return state;
-      const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers)); // Snapshot before change
-
+      const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
       const newCanvas = createOffscreenCanvas(state.canvasWidth, state.canvasHeight);
       const newLayer: Layer = {
         id: uuidv4(), name: `Layer ${state.layers.length + 1}`, isVisible: true, isLocked: false, opacity: 1.0,
@@ -142,16 +112,30 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     }
 
     case 'DELETE_LAYER': {
-      if (state.layers.length <= 1) return state;
-      const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
-
-      const layers = state.layers.filter(layer => layer.id !== action.id);
-      let activeLayerId = state.activeLayerId;
-      if (activeLayerId === action.id) {
-        const deletedIndex = state.layers.findIndex(l => l.id === action.id);
-        activeLayerId = layers[deletedIndex]?.id || layers[0]?.id || null;
+      if (state.layers.length <= 1 && action.type === 'DELETE_LAYER') {
+          alert("Cannot delete the last layer.");
+          return state;
       }
-      return { ...state, ...historyUpdate, layers, activeLayerId };
+      if (state.layers.length === 0) return state;
+      if (!state.activeLayerId && !action.id) { // Ensure there's a target for deletion
+          console.warn("DELETE_LAYER: No active layer and no specific ID provided.");
+          return state;
+      }
+      const layerIdToDelete = action.id || state.activeLayerId;
+      if (!layerIdToDelete || !state.layers.find(l => l.id === layerIdToDelete)) {
+          console.warn("DELETE_LAYER: Layer to delete not found:", layerIdToDelete);
+          return state;
+      }
+
+      const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+      const layersAfterDelete = state.layers.filter(layer => layer.id !== layerIdToDelete);
+      
+      let newActiveLayerId = state.activeLayerId;
+      if (state.activeLayerId === layerIdToDelete || layersAfterDelete.length === 0) {
+          const deletedIndex = state.layers.findIndex(l => l.id === layerIdToDelete);
+          newActiveLayerId = layersAfterDelete[Math.max(0, deletedIndex -1)]?.id || layersAfterDelete[0]?.id || null;
+      }
+      return { ...state, ...historyUpdate, layers: layersAfterDelete, activeLayerId: newActiveLayerId };
     }
 
     case 'REORDER_LAYERS': {
@@ -164,103 +148,123 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     }
 
     case 'UPDATE_LAYER_CANVAS': {
-      // Snapshot current state BEFORE this specific layer is updated
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
-
       return {
-        ...state,
-        ...historyUpdate, // Apply new history state
+        ...state, ...historyUpdate,
         layers: state.layers.map(layer =>
-          layer.id === action.id
-            ? { ...layer, offscreenCanvas: action.canvas, dataURL: action.dataURL }
-            : layer
+          layer.id === action.id ? { ...layer, offscreenCanvas: action.canvas, dataURL: action.dataURL } : layer
         ),
       };
     }
 
-    // Actions that modify layer properties but not canvas content directly
-    // could also be made undoable by pushing to history.
-    // For simplicity, focusing on UPDATE_LAYER_CANVAS for history.
-    // If others are needed, add `pushToHistory` call.
     case 'SET_LAYER_VISIBILITY':
     case 'SET_LAYER_LOCK':
     case 'SET_LAYER_OPACITY':
     case 'RENAME_LAYER':
-        // Example: Make RENAME_LAYER undoable
-        // const historyUpdateForRename = pushToHistory(state, serializeLayersForHistory(state.layers));
-        return {
-            ...state,
-            // ...historyUpdateForRename, // Uncomment if making this undoable
-            layers: state.layers.map(layer => {
+        return { ...state, layers: state.layers.map(layer => {
                 if (layer.id === action.id) {
                     if (action.type === 'SET_LAYER_VISIBILITY') return { ...layer, isVisible: action.isVisible };
                     if (action.type === 'SET_LAYER_LOCK') return { ...layer, isLocked: action.isLocked };
                     if (action.type === 'SET_LAYER_OPACITY') return { ...layer, opacity: action.opacity };
                     if (action.type === 'RENAME_LAYER') return { ...layer, name: action.name };
-                }
-                return layer;
+                } return layer;
             }),
         };
 
-
     case 'UNDO': {
-        if (state.historyIndex <= 0) return state; // Cannot undo if at the first state or no history
+        if (state.historyIndex <= 0) return state;
         const newHistoryIndex = state.historyIndex - 1;
         const historicalLayersData = state.history[newHistoryIndex];
-
-        const restoredLayers: Layer[] = historicalLayersData.map(data => ({
-            ...data,
-            // Mark offscreenCanvas as null; it will be hydrated by an effect in App.tsx
-            offscreenCanvas: null,
-        }));
-
-        return {
-            ...state,
-            layers: restoredLayers,
-            historyIndex: newHistoryIndex,
-            // Active layer might need to be restored if it's part of history snapshot
-            // For now, keep current activeLayerId or select the first one
-            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId)
-                           ? state.activeLayerId
-                           : restoredLayers[0]?.id || null,
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null }));
+        return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
+            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
         };
     }
-
     case 'REDO': {
-        if (state.historyIndex >= state.history.length - 1 || state.historyIndex < 0) {
-            return state; // Cannot redo if at the latest state or no history
-        }
+        if (state.historyIndex >= state.history.length - 1 || state.historyIndex < 0) return state;
         const newHistoryIndex = state.historyIndex + 1;
         const historicalLayersData = state.history[newHistoryIndex];
-
-        const restoredLayers: Layer[] = historicalLayersData.map(data => ({
-            ...data,
-            offscreenCanvas: null, // Mark for hydration
-        }));
-        return {
-            ...state,
-            layers: restoredLayers,
-            historyIndex: newHistoryIndex,
-            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId)
-                           ? state.activeLayerId
-                           : restoredLayers[0]?.id || null,
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null }));
+        return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
+            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
         };
     }
-
     case 'INTERNAL_UPDATE_LAYER_OFFSCREEN_CANVAS': {
-        // This action updates the offscreenCanvas object directly
-        // and SHOULD NOT create a new history entry.
-        return {
-            ...state,
-            layers: state.layers.map(layer =>
-                layer.id === action.layerId
-                    ? { ...layer, offscreenCanvas: action.canvas }
-                    : layer
-            ),
+        return { ...state, layers: state.layers.map(layer => layer.id === action.layerId ? { ...layer, offscreenCanvas: action.canvas } : layer ),
         };
     }
 
-    // Non-history actions
+    case 'COPY_LAYER': {
+        if (!state.activeLayerId) return state;
+        const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+        if (!activeLayer) return state;
+        const dataURLToCopy = activeLayer.offscreenCanvas ? activeLayer.offscreenCanvas.toDataURL() : activeLayer.dataURL;
+        const clipboardData: ClipboardLayerData = {
+            name: `${activeLayer.name} Copy`, isVisible: activeLayer.isVisible, isLocked: false,
+            opacity: activeLayer.opacity, dataURL: dataURLToCopy, originalId: activeLayer.id,
+        };
+        return { ...state, clipboard: clipboardData };
+    }
+
+    case 'CUT_LAYER': {
+        if (!state.activeLayerId) return state;
+        const activeLayerToCut = state.layers.find(l => l.id === state.activeLayerId);
+        if (!activeLayerToCut) return state;
+
+        const dataURLToCopy = activeLayerToCut.offscreenCanvas ? activeLayerToCut.offscreenCanvas.toDataURL() : activeLayerToCut.dataURL;
+        const clipboardData: ClipboardLayerData = {
+            name: activeLayerToCut.name, isVisible: activeLayerToCut.isVisible, isLocked: false,
+            opacity: activeLayerToCut.opacity, dataURL: dataURLToCopy, originalId: activeLayerToCut.id,
+        };
+
+        if (state.layers.length === 1) {
+            alert("Copied last layer. Cannot cut the last layer.");
+            return { ...state, clipboard: clipboardData };
+        }
+
+        const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+        const layersAfterCut = state.layers.filter(layer => layer.id !== state.activeLayerId);
+        let newActiveLayerId = state.activeLayerId; // Keep current if not deleting it
+        const deletedIndex = state.layers.findIndex(l => l.id === state.activeLayerId); // Find index before filtering
+        if (state.activeLayerId === activeLayerToCut.id || layersAfterCut.length === 0) { // If active was cut or list is empty
+             newActiveLayerId = layersAfterCut[Math.max(0, deletedIndex -1)]?.id || layersAfterCut[0]?.id || null;
+        }
+        
+        return { ...state, ...historyUpdate, layers: layersAfterCut, activeLayerId: newActiveLayerId, clipboard: clipboardData };
+    }
+
+    case 'PASTE_LAYER': {
+        if (!state.clipboard || !state.isInitialized) return state;
+        const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+        const newLayerId = uuidv4();
+        const pastedLayerData = state.clipboard;
+
+        let newLayerName = pastedLayerData.name || "Pasted Layer"; // Ensure name exists
+        let copyCount = 1;
+        const baseName = newLayerName.replace(/ Copy( \d+)?$/, "");
+        // --- Corrected Line: Use state.layers for checking existing names ---
+        while (state.layers.some(l => l.name === newLayerName)) {
+            newLayerName = `${baseName} Copy ${copyCount++}`;
+        }
+        // --- End Correction ---
+
+        const newPastedLayer: Layer = {
+            id: newLayerId, name: newLayerName, isVisible: pastedLayerData.isVisible,
+            isLocked: false, opacity: pastedLayerData.opacity, dataURL: pastedLayerData.dataURL,
+            offscreenCanvas: null,
+        };
+
+        let insertAtIndex = 0;
+        if (state.activeLayerId) {
+            const activeIdx = state.layers.findIndex(l => l.id === state.activeLayerId);
+            if (activeIdx !== -1) {
+                insertAtIndex = activeIdx;
+            }
+        }
+        const newLayers = [ ...state.layers.slice(0, insertAtIndex), newPastedLayer, ...state.layers.slice(insertAtIndex) ];
+        return { ...state, ...historyUpdate, layers: newLayers, activeLayerId: newLayerId };
+    }
+
     case 'SELECT_LAYER': return { ...state, activeLayerId: action.id };
     case 'SET_PRIMARY_COLOR': return { ...state, primaryColor: action.color };
     case 'SET_SELECTED_TOOL': return { ...state, selectedTool: action.tool };
@@ -268,6 +272,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     case 'SET_PREVIEW_OFFSET': return { ...state, previewOffset: action.offset };
     case 'SET_PREVIEW_ROTATION': return { ...state, previewRotation: action.rotation };
     case 'TOGGLE_COLOR_PICKER': return { ...state, isColorPickerOpen: action.open ?? !state.isColorPickerOpen };
+    case 'SET_CAMERA_PITCH': return { ...state, cameraPitch: action.pitch };
 
     default:
       return state;

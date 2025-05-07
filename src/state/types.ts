@@ -2,19 +2,23 @@
 
 export type Tool = 'pencil' | 'eraser' | 'eyedropper' | 'fill';
 
-// Serializable part of a layer for history
 export interface LayerDataForHistory {
   id: string;
   name: string;
   isVisible: boolean;
   isLocked: boolean;
   opacity: number;
-  dataURL: string | undefined; // dataURL is crucial for history
+  dataURL: string | undefined;
 }
 
 export interface Layer extends LayerDataForHistory {
-  offscreenCanvas: HTMLCanvasElement | null; // Can be null after undo/redo, before hydration
+  offscreenCanvas: HTMLCanvasElement | null;
 }
+
+// --- Define Clipboard Content Type ---
+// We'll store the full LayerDataForHistory, but generate a new ID on paste.
+export type ClipboardLayerData = Omit<LayerDataForHistory, 'id'> & { originalId?: string };
+
 
 export interface AppState {
   isInitialized: boolean;
@@ -28,17 +32,18 @@ export interface AppState {
   previewOffset: { x: number; y: number };
   previewRotation: number;
   isColorPickerOpen: boolean;
+  history: LayerDataForHistory[][];
+  historyIndex: number;
+  cameraPitch?: number; // Keep if you added this previously
 
-  // --- Undo/Redo State ---
-  history: LayerDataForHistory[][]; // Array of layer array snapshots
-  historyIndex: number; // Pointer to current state in history. -1 if empty, 0 for first state.
-                         // Max index is history.length - 1
-  // --- End Undo/Redo State ---
+  // --- Clipboard State ---
+  clipboard: ClipboardLayerData | null; // Can hold one layer's data
+  // --- End Clipboard State ---
 }
 
 export type LayerAction =
   | { type: 'INIT_PROJECT'; width: number; height: number; layerCount: number }
-  | { type: 'LOAD_STATE'; state: Partial<AppState> } // LOAD_STATE might also bring history
+  | { type: 'LOAD_STATE'; state: Partial<AppState> }
   | { type: 'ADD_LAYER' }
   | { type: 'DELETE_LAYER'; id: string }
   | { type: 'SELECT_LAYER'; id: string }
@@ -47,16 +52,20 @@ export type LayerAction =
   | { type: 'SET_LAYER_OPACITY'; id: string; opacity: number }
   | { type: 'RENAME_LAYER'; id: string; name: string }
   | { type: 'REORDER_LAYERS'; sourceIndex: number; destinationIndex: number }
-  | { type: 'UPDATE_LAYER_CANVAS'; id: string; canvas: HTMLCanvasElement; dataURL: string } // This will trigger history push
+  | { type: 'UPDATE_LAYER_CANVAS'; id: string; canvas: HTMLCanvasElement; dataURL: string }
   | { type: 'SET_PRIMARY_COLOR'; color: string }
   | { type: 'SET_SELECTED_TOOL'; tool: Tool }
   | { type: 'SET_ZOOM_LEVEL'; level: number }
   | { type: 'SET_PREVIEW_OFFSET'; offset: { x: number; y: number } }
   | { type: 'SET_PREVIEW_ROTATION'; rotation: number }
   | { type: 'TOGGLE_COLOR_PICKER'; open?: boolean }
-  // --- Undo/Redo Actions ---
   | { type: 'UNDO' }
   | { type: 'REDO' }
-  // --- Internal action for canvas hydration after undo/redo ---
-  // This action updates the offscreenCanvas object without affecting history
-  | { type: 'INTERNAL_UPDATE_LAYER_OFFSCREEN_CANVAS'; layerId: string; canvas: HTMLCanvasElement };
+  | { type: 'INTERNAL_UPDATE_LAYER_OFFSCREEN_CANVAS'; layerId: string; canvas: HTMLCanvasElement }
+  | { type: 'SET_CAMERA_PITCH'; pitch: number } // Keep if you added this
+
+  // --- Copy/Paste/Cut Actions ---
+  | { type: 'COPY_LAYER' }    // Copies the active layer to clipboard
+  | { type: 'CUT_LAYER' }     // Copies active layer to clipboard and deletes it
+  | { type: 'PASTE_LAYER' };  // Pastes layer from clipboard
+  // --- End Copy/Paste/Cut Actions ---
