@@ -55,30 +55,30 @@ SpriteStacker is a web-based pixel art application designed for creating pseudo-
 The project follows a standard React application structure:
 
 
-sprite-stacker/
-├── public/              # Static assets
-├── src/
-│   ├── assets/          # Images, fonts, etc.
-│   ├── components/      # React components (Canvas, Toolbar, LayerSidebar, etc.)
-│   │   ├── Canvas/
-│   │   ├── ColorPicker/
-│   │   ├── LayerSidebar/
-│   │   ├── Preview/
-│   │   ├── StartupModal/
-│   │   └── Toolbar/
-│   ├── hooks/           # Custom React hooks (useCanvasDrawing, useLayerManager, etc.)
-│   ├── state/           # Global state management (AppContext, types, reducer)
-│   ├── utils/           # Utility functions (canvas, color, file, LVGL export)
-│   ├── App.tsx          # Main application component
-│   ├── main.tsx         # Application entry point
-│   └── index.css        # Global styles & Tailwind directives
-├── tests/               # Unit tests (e.g., for useLayerManager)
-├── index.html           # Main HTML file
-├── package.json         # Project dependencies and scripts
-├── vite.config.ts       # Vite configuration
-├── tsconfig.json        # TypeScript configuration
-├── tailwind.config.cjs  # Tailwind CSS configuration
-└── postcss.config.cjs   # PostCSS configuration
+sprite-stacker/  
+├── public/              # Static assets  
+├── src/  
+│   ├── assets/          # Images, fonts, etc.  
+│   ├── components/      # React components (Canvas, Toolbar, LayerSidebar, etc.)  
+│   │   ├── Canvas/  
+│   │   ├── ColorPicker/  
+│   │   ├── LayerSidebar/  
+│   │   ├── Preview/  
+│   │   ├── StartupModal/  
+│   │   └── Toolbar/  
+│   ├── hooks/           # Custom React hooks (useCanvasDrawing, useLayerManager, etc.)  
+│   ├── state/           # Global state management (AppContext, types, reducer)  
+│   ├── utils/           # Utility functions (canvas, color, file, LVGL export)  
+│   ├── App.tsx          # Main application component  
+│   ├── main.tsx         # Application entry point  
+│   └── index.css        # Global styles & Tailwind directives  
+├── tests/               # Unit tests (e.g., for useLayerManager)  
+├── index.html           # Main HTML file  
+├── package.json         # Project dependencies and scripts  
+├── vite.config.ts       # Vite configuration  
+├── tsconfig.json        # TypeScript configuration  
+├── tailwind.config.cjs  # Tailwind CSS configuration  
+└── postcss.config.cjs   # PostCSS configuration  
 
 
 ## 🚀 Getting Started
