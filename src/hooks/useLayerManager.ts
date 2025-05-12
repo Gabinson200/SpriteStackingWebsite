@@ -17,10 +17,10 @@ const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => 
     return [serializeLayersForHistory(layers)];
 };
 
-const DEFAULT_CAMERA_PITCH = -35.2644;
+const DEFAULT_CAMERA_PITCH = -35.2644; // Or your preferred default
 
 export const initialAppState: AppState = {
-  isInitialized: false,
+  isInitialized: false, // This is key for showing the modal initially
   canvasWidth: 0,
   canvasHeight: 0,
   layers: [],
@@ -28,13 +28,15 @@ export const initialAppState: AppState = {
   selectedTool: 'pencil',
   primaryColor: '#000000ff',
   zoomLevel: 4,
-  previewOffset: { x: 0, y: 1.5 },
+  previewOffset: { x: 1, y: 1 }, // User's provided default from previous snippet
   previewRotation: 0,
   isColorPickerOpen: false,
   history: [],
   historyIndex: -1,
-  cameraPitch: DEFAULT_CAMERA_PITCH,
+  cameraPitch: DEFAULT_CAMERA_PITCH, // Initialize if you have this feature
   clipboard: null,
+  showGrid: false,
+    cursorCoords: null, // Logical coordinates on canvas
 };
 
 const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHistory[]): Pick<AppState, 'history' | 'historyIndex'> => {
@@ -54,6 +56,11 @@ const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHi
 
 export const layerReducer: Reducer<AppState, LayerAction> = (state, action): AppState => {
   switch (action.type) {
+    case 'SHOW_NEW_PROJECT_MODAL':
+        // Reset the entire state to its initial uninitialized form
+        // This will cause App.tsx to show the StartupModal
+        return { ...initialAppState }; // isInitialized is false in initialAppState
+
     case 'INIT_PROJECT': {
       const { width, height, layerCount } = action;
       const initialLayers: Layer[] = [];
@@ -65,12 +72,20 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         });
       }
       const reversedInitialLayers = initialLayers.reverse();
+      // When initializing a project, ensure all other relevant fields are also set from a clean slate
+      // but keep isInitialized true.
       return {
-        ...initialAppState,
-        isInitialized: true, canvasWidth: width, canvasHeight: height, layers: reversedInitialLayers,
+        ...initialAppState, // Start with all defaults (like cameraPitch, clipboard: null etc.)
+        isInitialized: true, // This is the key difference from SHOW_NEW_PROJECT_MODAL
+        canvasWidth: width,
+        canvasHeight: height,
+        layers: reversedInitialLayers,
         activeLayerId: reversedInitialLayers[0]?.id || null,
         zoomLevel: calculateInitialZoom(width, height),
-        history: createInitialHistoryEntry(reversedInitialLayers), historyIndex: 0,
+        history: createInitialHistoryEntry(reversedInitialLayers),
+        historyIndex: 0,
+        // Explicitly carry over any non-project specific settings if needed,
+        // or ensure initialAppState has suitable defaults.
       };
     }
 
@@ -80,42 +95,28 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         if (loadedState.layers && loadedState.canvasWidth && loadedState.canvasHeight) {
             reconstructedLayers = loadedState.layers.map(layerData => ({
                 ...layerData,
-                // --- CRITICAL CHANGE FOR HYDRATION ---
-                // Set offscreenCanvas to null to ensure the hydration effect in App.tsx picks it up.
-                // The dataURL from the file will be used to repopulate it.
-                offscreenCanvas: null,
-                // --- END CRITICAL CHANGE ---
-            } as Layer)); // Assert type, dataURL should be present in layerData
+                offscreenCanvas: null, // Mark for hydration
+            } as Layer));
         }
         const historyFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.history : createInitialHistoryEntry(reconstructedLayers); // History also needs LayerDataForHistory
+            ? loadedState.history.map(snapshot => snapshot.map(layerInHistory => ({ ...layerInHistory }))) // Deep copy history
+            : createInitialHistoryEntry(reconstructedLayers);
         const historyIndexFromLoad = loadedState.history && loadedState.historyIndex !== undefined
             ? loadedState.historyIndex : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
-        
-        // Ensure the history array itself contains LayerDataForHistory arrays
-        const validHistory = historyFromLoad.map(historySnapshot => 
-            historySnapshot.map(layerInHistory => ({
-                id: layerInHistory.id,
-                name: layerInHistory.name,
-                isVisible: layerInHistory.isVisible,
-                isLocked: layerInHistory.isLocked,
-                opacity: layerInHistory.opacity,
-                dataURL: layerInHistory.dataURL,
-            }))
-        );
-
         return {
-            ...initialAppState, // Start with defaults to ensure all AppState fields are present
+            ...initialAppState, // Start with defaults
             ...loadedState,    // Override with loaded data
             layers: reconstructedLayers,
             isInitialized: true, // Mark as initialized after loading
             canvasWidth: loadedState.canvasWidth ?? initialAppState.canvasWidth,
             canvasHeight: loadedState.canvasHeight ?? initialAppState.canvasHeight,
             activeLayerId: loadedState.activeLayerId ?? reconstructedLayers[0]?.id ?? null,
-            history: validHistory as LayerDataForHistory[][], // Use validated history
+            history: historyFromLoad as LayerDataForHistory[][],
             historyIndex: historyIndexFromLoad,
             cameraPitch: loadedState.cameraPitch ?? initialAppState.cameraPitch,
             clipboard: loadedState.clipboard ?? null,
+            showGrid: loadedState.showGrid ?? initialAppState.showGrid,
+            cursorCoords: null,
         };
     }
 
@@ -256,7 +257,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newPastedLayer: Layer = {
             id: newLayerId, name: newLayerName, isVisible: pastedLayerData.isVisible,
             isLocked: false, opacity: pastedLayerData.opacity, dataURL: pastedLayerData.dataURL,
-            offscreenCanvas: null, // Mark for hydration
+            offscreenCanvas: null,
         };
         let insertAtIndex = 0;
         if (state.activeLayerId) {
@@ -278,6 +279,13 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     case 'TOGGLE_COLOR_PICKER': return { ...state, isColorPickerOpen: action.open ?? !state.isColorPickerOpen };
     case 'SET_CAMERA_PITCH': return { ...state, cameraPitch: action.pitch };
 
+    // --- Handle Grid and Cursor Actions ---
+    case 'TOGGLE_GRID':
+        return { ...state, showGrid: !state.showGrid };
+    case 'SET_CURSOR_COORDS':
+        return { ...state, cursorCoords: action.coords };
+    // --- End Handle Grid and Cursor Actions ---
+    
     default:
       return state;
   }

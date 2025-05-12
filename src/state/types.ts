@@ -15,8 +15,6 @@ export interface Layer extends LayerDataForHistory {
   offscreenCanvas: HTMLCanvasElement | null;
 }
 
-// --- Define Clipboard Content Type ---
-// We'll store the full LayerDataForHistory, but generate a new ID on paste.
 export type ClipboardLayerData = Omit<LayerDataForHistory, 'id'> & { originalId?: string };
 
 
@@ -34,11 +32,13 @@ export interface AppState {
   isColorPickerOpen: boolean;
   history: LayerDataForHistory[][];
   historyIndex: number;
-  cameraPitch?: number; // Keep if you added this previously
+  cameraPitch?: number;
+  clipboard: ClipboardLayerData | null;
 
-  // --- Clipboard State ---
-  clipboard: ClipboardLayerData | null; // Can hold one layer's data
-  // --- End Clipboard State ---
+  // --- Grid and Cursor State ---
+  showGrid: boolean;
+  cursorCoords: { x: number; y: number } | null; // Logical coordinates on canvas
+  // --- End Grid and Cursor State ---
 }
 
 export type LayerAction =
@@ -62,10 +62,13 @@ export type LayerAction =
   | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'INTERNAL_UPDATE_LAYER_OFFSCREEN_CANVAS'; layerId: string; canvas: HTMLCanvasElement }
-  | { type: 'SET_CAMERA_PITCH'; pitch: number } // Keep if you added this
+  | { type: 'SET_CAMERA_PITCH'; pitch: number }
+  | { type: 'COPY_LAYER' }
+  | { type: 'CUT_LAYER' }
+  | { type: 'PASTE_LAYER' }
+  | { type: 'SHOW_NEW_PROJECT_MODAL' }
 
-  // --- Copy/Paste/Cut Actions ---
-  | { type: 'COPY_LAYER' }    // Copies the active layer to clipboard
-  | { type: 'CUT_LAYER' }     // Copies active layer to clipboard and deletes it
-  | { type: 'PASTE_LAYER' };  // Pastes layer from clipboard
-  // --- End Copy/Paste/Cut Actions ---
+  // --- Grid and Cursor Actions ---
+  | { type: 'TOGGLE_GRID' }
+  | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null };
+  // --- End Grid and Cursor Actions ---

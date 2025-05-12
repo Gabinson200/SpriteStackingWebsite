@@ -1,7 +1,7 @@
 // src/hooks/useCanvasDrawing.ts
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useAppContext } from '../state/AppContext';
-import type { Layer, Tool } from '../state/types'; // Use type import
+import type { Layer, Tool } from '../state/types';
 import { parseColor } from '../utils/colorUtils';
 import {
   getPixelColor,
@@ -23,6 +23,7 @@ interface UseCanvasDrawingProps {
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 32;
 const ZOOM_SENSITIVITY = 0.0025;
+const GRID_VISIBILITY_ZOOM_THRESHOLD = 4;
 
 export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingProps) {
   const { state, dispatch } = useAppContext();
@@ -30,10 +31,11 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     canvasWidth,
     canvasHeight,
     layers,
-    activeLayerId, // Will be used to determine starting point for eyedropper
+    activeLayerId,
     selectedTool,
     primaryColor,
     zoomLevel,
+    showGrid,
   } = state;
 
   const [redrawNonce, setRedrawNonce] = useState(0);
@@ -71,43 +73,21 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         const clearFunc = (ctx: CanvasRenderingContext2D, x: number, y: number) => clearPixel(ctx, x, y);
         drawLine(ctx, x0, y0, x1, y1, 'transparent', clearFunc);
     }, []);
-
-  // --- Modified eyedropperSample ---
   const eyedropperSample = useCallback((logicalCoords: { x: number; y: number }) => {
         console.log(`Eyedropper: Sampling at logical coordinates (${logicalCoords.x}, ${logicalCoords.y})`);
-
-        // Find the index of the active layer
         const activeLayerIndex = layers.findIndex(layer => layer.id === activeLayerId);
-
-        if (activeLayerIndex === -1) {
-            console.log("Eyedropper: No active layer found. Cannot sample.");
-            return; // Should not happen if a layer is always active
-        }
-
-        // Iterate from the active layer downwards (towards higher indices)
+        if (activeLayerIndex === -1) { console.log("Eyedropper: No active layer."); return; }
         for (let i = activeLayerIndex; i < layers.length; i++) {
             const layer = layers[i];
-            console.log(`Eyedropper: Checking layer "${layer.name}" (ID: ${layer.id}, Index: ${i}), Visible: ${layer.isVisible}`);
-
             if (layer.isVisible && layer.offscreenCanvas) {
                 const ctx = layer.offscreenCanvas.getContext('2d');
                 if (ctx) {
                     const color = getPixelColor(ctx, logicalCoords.x, logicalCoords.y);
-                    console.log(`Eyedropper: Color sampled from "${layer.name}":`, color);
-                    if (color) { // Found first non-transparent pixel
-                        console.log(`Eyedropper: Dispatching SET_PRIMARY_COLOR with ${color}`);
-                        dispatch({ type: 'SET_PRIMARY_COLOR', color });
-                        return; // Stop sampling
-                    }
-                } else {
-                    console.log(`Eyedropper: Could not get context for layer "${layer.name}"`);
+                    if (color) { dispatch({ type: 'SET_PRIMARY_COLOR', color }); return; }
                 }
             }
         }
-        console.log("Eyedropper: No color found at coordinates from active layer downwards (all relevant layers transparent or invisible).");
-    }, [layers, dispatch, activeLayerId]); // Added activeLayerId dependency
-  // --- End Modified eyedropperSample ---
-
+    }, [layers, dispatch, activeLayerId]);
   const floodFill = useCallback((startX: number, startY: number) => {
     const ctx = activeCtxCache.current;
     const layer = activeLayerCache.current;
@@ -148,18 +128,14 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     const ctx = activeCtxCache.current;
     if (!ctx) return;
     event.preventDefault();
-
     switch (selectedTool) {
         case 'pencil':
         case 'eraser':
             isDrawing.current = true;
             lastPoint.current = coords;
             ctx.save();
-            if (selectedTool === 'pencil') {
-                drawPixel(ctx, coords.x, coords.y, primaryColor);
-            } else {
-                clearPixel(ctx, coords.x, coords.y);
-            }
+            if (selectedTool === 'pencil') { drawPixel(ctx, coords.x, coords.y, primaryColor); }
+            else { clearPixel(ctx, coords.x, coords.y); }
             setRedrawNonce(n => n + 1);
             break;
         case 'eyedropper':
@@ -173,12 +149,21 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     }
   }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, eyedropperSample, floodFill]);
 
+  // --- MODIFIED handlePointerMove ---
   const handlePointerMove = useCallback((event: PointerEvent) => {
-      if (!isDrawing.current || !lastPoint.current || selectedTool === 'fill' || selectedTool === 'eyedropper') return;
       const coords = getLogicalCoords(event);
+      // Always dispatch cursor coordinates if over the canvas
+      dispatch({ type: 'SET_CURSOR_COORDS', coords: coords });
+
+      // Drawing logic only if isDrawing.current is true for relevant tools
+      if (!isDrawing.current || !lastPoint.current || selectedTool === 'fill' || selectedTool === 'eyedropper') {
+          return; // Exit if not actively drawing or if tool doesn't draw on move
+      }
+
       const currentLayer = activeLayerCache.current;
+      // Stop drawing if moving outside bounds or onto a locked layer (while drawing)
       if (!coords || !currentLayer || currentLayer.isLocked) {
-          if (isDrawing.current) {
+          if (isDrawing.current) { // Check if we were drawing before leaving
               isDrawing.current = false;
               lastPoint.current = null;
               if (activeCtxCache.current && (selectedTool === 'pencil' || selectedTool === 'eraser')) {
@@ -192,8 +177,11 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
           }
           return;
       }
+
       const ctx = activeCtxCache.current;
       if (!ctx) return;
+
+      // Draw line segment if logical coordinates changed
       if (coords.x !== lastPoint.current.x || coords.y !== lastPoint.current.y) {
         switch (selectedTool) {
           case 'pencil':
@@ -203,10 +191,11 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
               eraserDraw(ctx, lastPoint.current.x, lastPoint.current.y, coords.x, coords.y);
               break;
         }
-        lastPoint.current = coords;
-        setRedrawNonce(n => n + 1);
+        lastPoint.current = coords; // Update last point
+        setRedrawNonce(n => n + 1); // Trigger redraw of main canvas
       }
-  }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, dispatch, pencilDraw, eraserDraw]);
+  }, [getLogicalCoords, dispatch, selectedTool, primaryColor, pencilDraw, eraserDraw, activeLayerCache, activeCtxCache]);
+  // --- END MODIFIED handlePointerMove ---
 
   const finalizeDrawing = useCallback(() => {
     if (isDrawing.current && (selectedTool === 'pencil' || selectedTool === 'eraser')) {
@@ -238,10 +227,11 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
   }, [finalizeDrawing]);
 
  const handlePointerLeave = useCallback((event: PointerEvent) => {
+     dispatch({ type: 'SET_CURSOR_COORDS', coords: null });
      if (isDrawing.current) {
          finalizeDrawing();
      }
-  }, [finalizeDrawing]);
+  }, [finalizeDrawing, dispatch]);
 
   const handleWheelZoom = useCallback((event: WheelEvent) => {
     event.preventDefault();
@@ -252,7 +242,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
   }, [zoomLevel, dispatch]);
 
 
-  useEffect(() => {
+  useEffect(() => { // Event listeners
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.addEventListener('pointerdown', handlePointerDown);
@@ -270,16 +260,14 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
   }, [canvasRef, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerLeave, handleWheelZoom]);
 
 
+  // Effect to redraw the main canvas (including grid)
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
 
-    if (!ctx || !canvas || canvasWidth <= 0 || canvasHeight <= 0) {
-        return;
-    }
+    if (!ctx || !canvas || canvasWidth <= 0 || canvasHeight <= 0) return;
 
     const activeIndex = layers.findIndex(l => l.id === activeLayerId);
-
     canvas.width = canvasWidth * zoomLevel;
     canvas.height = canvasHeight * zoomLevel;
     ctx.imageSmoothingEnabled = false;
@@ -305,15 +293,28 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             const layerToDraw = layers[i];
             if (layerToDraw && layerToDraw.isVisible && layerToDraw.offscreenCanvas) {
                 ctx.globalAlpha = (i === activeIndex) ? layerToDraw.opacity : 1.0;
-                ctx.drawImage(
-                    layerToDraw.offscreenCanvas,
-                    0, 0,
-                    canvas.width, canvas.height
-                );
+                ctx.drawImage( layerToDraw.offscreenCanvas, 0, 0, canvas.width, canvas.height );
             }
         }
         ctx.globalAlpha = 1.0;
     }
-  }, [canvasRef, layers, activeLayerId, canvasWidth, canvasHeight, zoomLevel, selectedTool, redrawNonce]);
+
+    if (showGrid && zoomLevel >= GRID_VISIBILITY_ZOOM_THRESHOLD) {
+        ctx.strokeStyle = "rgba(128, 128, 128, 0.5)";
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= canvasWidth; x++) {
+            ctx.beginPath();
+            ctx.moveTo(x * zoomLevel - 0.5, 0);
+            ctx.lineTo(x * zoomLevel - 0.5, canvas.height);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= canvasHeight; y++) {
+            ctx.beginPath();
+            ctx.moveTo(0, y * zoomLevel - 0.5);
+            ctx.lineTo(canvas.width, y * zoomLevel - 0.5);
+            ctx.stroke();
+        }
+    }
+  }, [canvasRef, layers, activeLayerId, canvasWidth, canvasHeight, zoomLevel, selectedTool, redrawNonce, showGrid]);
 
 }
