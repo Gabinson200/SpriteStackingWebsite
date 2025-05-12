@@ -33,10 +33,10 @@ export async function exportCanvasAsPNG(canvas: HTMLCanvasElement, filename: str
 
 /**
  * Triggers a browser download for a text string.
- * This is used for downloading generated code files like .h or .c files.
+ * This is used for downloading generated code files like .h or .c files, or JSON project files.
  * @param textContent The string content to download.
- * @param filename The desired filename (e.g., "output.txt", "lvgl_assets.h").
- * @param mimeType The MIME type for the file (e.g., "text/plain", "text/x-c", "application/octet-stream").
+ * @param filename The desired filename (e.g., "output.txt", "project.ssp", "lvgl_assets.h").
+ * @param mimeType The MIME type for the file (e.g., "text/plain", "application/json", "text/x-c").
  */
 export function downloadTextFile(
     textContent: string,
@@ -60,4 +60,51 @@ export function downloadTextFile(
     // Provide user feedback
     alert(`Error creating text file: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * Opens a file dialog for the user to select a JSON file, then reads and parses its content.
+ * @param allowedExtension Optional file extension to filter for (e.g., ".json", ".ssp"). Defaults to ".json".
+ * @returns A Promise that resolves with the parsed JSON object, or rejects with an error.
+ */
+export function openJsonFile<T = unknown>(allowedExtension: string = ".json"): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = allowedExtension; // Filter for JSON files or custom extension
+
+    input.onchange = (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0];
+      if (!file) {
+        reject(new Error("No file selected."));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (readerEvent) => {
+        try {
+          const textContent = readerEvent.target?.result as string;
+          if (textContent) {
+            const jsonData = JSON.parse(textContent) as T;
+            resolve(jsonData);
+          } else {
+            reject(new Error("File content is empty or could not be read."));
+          }
+        } catch (parseError) {
+          console.error("Error parsing JSON file:", parseError);
+          reject(new Error(`Error parsing file: ${parseError instanceof Error ? parseError.message : String(parseError)}`));
+        }
+      };
+
+      reader.onerror = (error) => {
+        console.error("Error reading file:", error);
+        reject(new Error(`Error reading file: ${reader.error?.message || "Unknown error"}`));
+      };
+
+      reader.readAsText(file);
+    };
+
+    // Trigger the file input dialog
+    input.click();
+  });
 }

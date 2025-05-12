@@ -17,7 +17,7 @@ const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => 
     return [serializeLayersForHistory(layers)];
 };
 
-const DEFAULT_CAMERA_PITCH = -35.2644; // Default if using camera pitch feature
+const DEFAULT_CAMERA_PITCH = -35.2644;
 
 export const initialAppState: AppState = {
   isInitialized: false,
@@ -80,25 +80,46 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         if (loadedState.layers && loadedState.canvasWidth && loadedState.canvasHeight) {
             reconstructedLayers = loadedState.layers.map(layerData => ({
                 ...layerData,
-                offscreenCanvas: createOffscreenCanvas(loadedState.canvasWidth!, loadedState.canvasHeight!),
-            } as Layer));
+                // --- CRITICAL CHANGE FOR HYDRATION ---
+                // Set offscreenCanvas to null to ensure the hydration effect in App.tsx picks it up.
+                // The dataURL from the file will be used to repopulate it.
+                offscreenCanvas: null,
+                // --- END CRITICAL CHANGE ---
+            } as Layer)); // Assert type, dataURL should be present in layerData
         }
         const historyFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.history : createInitialHistoryEntry(reconstructedLayers);
+            ? loadedState.history : createInitialHistoryEntry(reconstructedLayers); // History also needs LayerDataForHistory
         const historyIndexFromLoad = loadedState.history && loadedState.historyIndex !== undefined
             ? loadedState.historyIndex : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
+        
+        // Ensure the history array itself contains LayerDataForHistory arrays
+        const validHistory = historyFromLoad.map(historySnapshot => 
+            historySnapshot.map(layerInHistory => ({
+                id: layerInHistory.id,
+                name: layerInHistory.name,
+                isVisible: layerInHistory.isVisible,
+                isLocked: layerInHistory.isLocked,
+                opacity: layerInHistory.opacity,
+                dataURL: layerInHistory.dataURL,
+            }))
+        );
+
         return {
-            ...initialAppState, ...loadedState, layers: reconstructedLayers, isInitialized: true,
+            ...initialAppState, // Start with defaults to ensure all AppState fields are present
+            ...loadedState,    // Override with loaded data
+            layers: reconstructedLayers,
+            isInitialized: true, // Mark as initialized after loading
             canvasWidth: loadedState.canvasWidth ?? initialAppState.canvasWidth,
             canvasHeight: loadedState.canvasHeight ?? initialAppState.canvasHeight,
             activeLayerId: loadedState.activeLayerId ?? reconstructedLayers[0]?.id ?? null,
-            history: historyFromLoad as LayerDataForHistory[][],
+            history: validHistory as LayerDataForHistory[][], // Use validated history
             historyIndex: historyIndexFromLoad,
             cameraPitch: loadedState.cameraPitch ?? initialAppState.cameraPitch,
             clipboard: loadedState.clipboard ?? null,
         };
     }
 
+    // ... (ADD_LAYER, DELETE_LAYER, REORDER_LAYERS, UPDATE_LAYER_CANVAS - same as before) ...
     case 'ADD_LAYER': {
       if (!state.isInitialized) return state;
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
@@ -110,26 +131,19 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
       const newLayers = [newLayer, ...state.layers];
       return { ...state, ...historyUpdate, layers: newLayers, activeLayerId: newLayer.id };
     }
-
     case 'DELETE_LAYER': {
       if (state.layers.length <= 1 && action.type === 'DELETE_LAYER') {
           alert("Cannot delete the last layer.");
           return state;
       }
       if (state.layers.length === 0) return state;
-      if (!state.activeLayerId && !action.id) { // Ensure there's a target for deletion
-          console.warn("DELETE_LAYER: No active layer and no specific ID provided.");
-          return state;
-      }
       const layerIdToDelete = action.id || state.activeLayerId;
       if (!layerIdToDelete || !state.layers.find(l => l.id === layerIdToDelete)) {
           console.warn("DELETE_LAYER: Layer to delete not found:", layerIdToDelete);
           return state;
       }
-
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
       const layersAfterDelete = state.layers.filter(layer => layer.id !== layerIdToDelete);
-      
       let newActiveLayerId = state.activeLayerId;
       if (state.activeLayerId === layerIdToDelete || layersAfterDelete.length === 0) {
           const deletedIndex = state.layers.findIndex(l => l.id === layerIdToDelete);
@@ -137,7 +151,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
       }
       return { ...state, ...historyUpdate, layers: layersAfterDelete, activeLayerId: newActiveLayerId };
     }
-
     case 'REORDER_LAYERS': {
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
         const { sourceIndex, destinationIndex } = action;
@@ -146,7 +159,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         layers.splice(destinationIndex, 0, removed);
         return { ...state, ...historyUpdate, layers };
     }
-
     case 'UPDATE_LAYER_CANVAS': {
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
       return {
@@ -156,6 +168,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         ),
       };
     }
+
 
     case 'SET_LAYER_VISIBILITY':
     case 'SET_LAYER_LOCK':
@@ -210,26 +223,22 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         if (!state.activeLayerId) return state;
         const activeLayerToCut = state.layers.find(l => l.id === state.activeLayerId);
         if (!activeLayerToCut) return state;
-
         const dataURLToCopy = activeLayerToCut.offscreenCanvas ? activeLayerToCut.offscreenCanvas.toDataURL() : activeLayerToCut.dataURL;
         const clipboardData: ClipboardLayerData = {
             name: activeLayerToCut.name, isVisible: activeLayerToCut.isVisible, isLocked: false,
             opacity: activeLayerToCut.opacity, dataURL: dataURLToCopy, originalId: activeLayerToCut.id,
         };
-
         if (state.layers.length === 1) {
             alert("Copied last layer. Cannot cut the last layer.");
             return { ...state, clipboard: clipboardData };
         }
-
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
         const layersAfterCut = state.layers.filter(layer => layer.id !== state.activeLayerId);
-        let newActiveLayerId = state.activeLayerId; // Keep current if not deleting it
-        const deletedIndex = state.layers.findIndex(l => l.id === state.activeLayerId); // Find index before filtering
-        if (state.activeLayerId === activeLayerToCut.id || layersAfterCut.length === 0) { // If active was cut or list is empty
+        let newActiveLayerId = state.activeLayerId;
+        const deletedIndex = state.layers.findIndex(l => l.id === state.activeLayerId);
+        if (state.activeLayerId === activeLayerToCut.id || layersAfterCut.length === 0) {
              newActiveLayerId = layersAfterCut[Math.max(0, deletedIndex -1)]?.id || layersAfterCut[0]?.id || null;
         }
-        
         return { ...state, ...historyUpdate, layers: layersAfterCut, activeLayerId: newActiveLayerId, clipboard: clipboardData };
     }
 
@@ -238,22 +247,17 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
         const newLayerId = uuidv4();
         const pastedLayerData = state.clipboard;
-
-        let newLayerName = pastedLayerData.name || "Pasted Layer"; // Ensure name exists
+        let newLayerName = pastedLayerData.name || "Pasted Layer";
         let copyCount = 1;
         const baseName = newLayerName.replace(/ Copy( \d+)?$/, "");
-        // --- Corrected Line: Use state.layers for checking existing names ---
         while (state.layers.some(l => l.name === newLayerName)) {
             newLayerName = `${baseName} Copy ${copyCount++}`;
         }
-        // --- End Correction ---
-
         const newPastedLayer: Layer = {
             id: newLayerId, name: newLayerName, isVisible: pastedLayerData.isVisible,
             isLocked: false, opacity: pastedLayerData.opacity, dataURL: pastedLayerData.dataURL,
-            offscreenCanvas: null,
+            offscreenCanvas: null, // Mark for hydration
         };
-
         let insertAtIndex = 0;
         if (state.activeLayerId) {
             const activeIdx = state.layers.findIndex(l => l.id === state.activeLayerId);
