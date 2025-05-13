@@ -19,9 +19,9 @@ export function createOffscreenCanvas(width: number, height: number): HTMLCanvas
 
 export function drawCheckerboard(ctx: CanvasRenderingContext2D, width: number, height: number, squareSize: number = 8): void {
   ctx.save();
-  ctx.fillStyle = '#ffffff'; // White background
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = '#cccccc'; // Light gray squares
+  ctx.fillStyle = '#cccccc';
   for (let i = 0; i < width; i += squareSize * 2) {
     for (let j = 0; j < height; j += squareSize * 2) {
       ctx.fillRect(i, j, squareSize, squareSize);
@@ -31,72 +31,100 @@ export function drawCheckerboard(ctx: CanvasRenderingContext2D, width: number, h
   ctx.restore();
 }
 
-/**
- * Gets the RGBA color of a pixel on a specific canvas at logical coordinates.
- * Returns null if coordinates are out of bounds or pixel is transparent.
- * @param ctx - The 2D rendering context of the canvas to sample from.
- * @param x - The logical x-coordinate of the pixel.
- * @param y - The logical y-coordinate of the pixel.
- * @returns A hex string #RRGGBBAA or null.
- */
 export function getPixelColor(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number
 ): string | null {
     if (x < 0 || x >= ctx.canvas.width || y < 0 || y >= ctx.canvas.height) {
-        // console.warn(`getPixelColor: Coordinates (${x}, ${y}) out of bounds for canvas (${ctx.canvas.width}x${ctx.canvas.height})`);
-        return null; // Out of bounds
+        return null;
     }
     try {
         const imageData = ctx.getImageData(x, y, 1, 1);
         const [r, g, b, a] = imageData.data;
-
-        if (a === 0) {
-            // console.log(`getPixelColor: Pixel at (${x}, ${y}) is transparent.`);
-            return null; // Transparent pixel
-        }
-
-        // Helper function to convert a number to a 2-digit hex string
+        if (a === 0) return null;
         const toHex = (n: number): string => n.toString(16).padStart(2, '0');
-
-        // --- Corrected Hex String Formatting ---
         return `#${toHex(r)}${toHex(g)}${toHex(b)}${toHex(a)}`.toUpperCase();
-        // --- End Correction ---
-
     } catch (error) {
         console.error(`Error in getPixelColor at (${x}, ${y}):`, error);
         return null;
     }
 }
 
-
+/**
+ * Draws a square of pixels (brush) onto a canvas context.
+ * The (x,y) coordinate is now the CENTER of the brush square.
+ * @param ctx The canvas rendering context.
+ * @param centerX The logical x-coordinate (center of brush).
+ * @param centerY The logical y-coordinate (center of brush).
+ * @param color The color to draw with.
+ * @param brushSize The size of the brush (e.g., 1 for 1x1, 2 for 2x2).
+ */
 export function drawPixel(
     ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
+    centerX: number,
+    centerY: number,
     color: string,
-    pixelSize: number = 1
+    brushSize: number = 1
 ): void {
     ctx.fillStyle = color;
-    ctx.fillRect(x, y, pixelSize, pixelSize);
+    // Calculate top-left corner for fillRect based on center and brushSize
+    const offset = Math.floor(brushSize / 2);
+    const topLeftX = centerX - offset;
+    const topLeftY = centerY - offset;
+
+    // For odd brush sizes, this centers perfectly.
+    // For even brush sizes (e.g., 2x2), this will make the cursor effectively be
+    // at the top-left of the four central pixels if we consider integer coordinates.
+    // If brushSize is 2, offset is 1. (cx-1, cy-1) becomes top-left.
+    // If brushSize is 1, offset is 0. (cx, cy) becomes top-left.
+    // If brushSize is 3, offset is 1. (cx-1, cy-1) becomes top-left.
+    // This behavior is generally acceptable for pixel art.
+
+    ctx.fillRect(topLeftX, topLeftY, brushSize, brushSize);
 }
 
+/**
+ * Clears a square of pixels (brush) on a canvas context.
+ * The (x,y) coordinate is now the CENTER of the brush square.
+ * @param ctx The canvas rendering context.
+ * @param centerX The logical x-coordinate (center of brush).
+ * @param centerY The logical y-coordinate (center of brush).
+ * @param brushSize The size of the brush to clear.
+ */
 export function clearPixel(
     ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    pixelSize: number = 1
+    centerX: number,
+    centerY: number,
+    brushSize: number = 1
 ): void {
-    ctx.clearRect(x, y, pixelSize, pixelSize);
+    const offset = Math.floor(brushSize / 2);
+    const topLeftX = centerX - offset;
+    const topLeftY = centerY - offset;
+    ctx.clearRect(topLeftX, topLeftY, brushSize, brushSize);
 }
 
+/**
+ * Draws a line between two points using a given drawing function (e.g., drawPixel).
+ * The drawing function will be called for each point along the line,
+ * treating the point as the CENTER of the brush.
+ * @param ctx The canvas rendering context.
+ * @param x0 Starting x-coordinate (center of first brush point).
+ * @param y0 Starting y-coordinate (center of first brush point).
+ * @param x1 Ending x-coordinate (center of last brush point).
+ * @param y1 Ending y-coordinate (center of last brush point).
+ * @param color The color to use for drawing.
+ * @param drawFunc The function to call for each point (e.g., drawPixel).
+ * It should accept (ctx, centerX, centerY, color, brushSize).
+ * @param brushSize The brush size to pass to the drawFunc.
+ */
 export function drawLine(
    ctx: CanvasRenderingContext2D,
    x0: number, y0: number,
    x1: number, y1: number,
    color: string,
-   drawFunc: (ctx: CanvasRenderingContext2D, x: number, y: number, color: string) => void
+   drawFunc: (ctx: CanvasRenderingContext2D, centerX: number, centerY: number, color: string, brushSize: number) => void,
+   brushSize: number
  ) {
    const dx = Math.abs(x1 - x0);
    const dy = Math.abs(y1 - y0);
@@ -104,12 +132,17 @@ export function drawLine(
    const sy = (y0 < y1) ? 1 : -1;
    let err = dx - dy;
 
+   let currentX = x0;
+   let currentY = y0;
+
    while (true) {
-     drawFunc(ctx, x0, y0, color);
-     if ((x0 === x1) && (y0 === y1)) break;
+     // currentX, currentY are now treated as the center for the drawFunc
+     drawFunc(ctx, currentX, currentY, color, brushSize);
+
+     if ((currentX === x1) && (currentY === y1)) break;
      const e2 = 2 * err;
-     if (e2 > -dy) { err -= dy; x0 += sx; }
-     if (e2 < dx) { err += dx; y0 += sy; }
+     if (e2 > -dy) { err -= dy; currentX += sx; }
+     if (e2 < dx) { err += dx; currentY += sy; }
    }
  }
 

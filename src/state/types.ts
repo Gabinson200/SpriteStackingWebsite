@@ -34,11 +34,12 @@ export interface AppState {
   historyIndex: number;
   cameraPitch?: number;
   clipboard: ClipboardLayerData | null;
-
-  // --- Grid and Cursor State ---
   showGrid: boolean;
-  cursorCoords: { x: number; y: number } | null; // Logical coordinates on canvas
-  // --- End Grid and Cursor State ---
+  cursorCoords: { x: number; y: number } | null;
+
+  // --- Brush Size State ---
+  brushSize: number; // e.g., 1 for 1x1, 2 for 2x2, etc.
+  // --- End Brush Size State ---
 }
 
 export type LayerAction =
@@ -67,8 +68,9 @@ export type LayerAction =
   | { type: 'CUT_LAYER' }
   | { type: 'PASTE_LAYER' }
   | { type: 'SHOW_NEW_PROJECT_MODAL' }
-
-  // --- Grid and Cursor Actions ---
   | { type: 'TOGGLE_GRID' }
-  | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null };
-  // --- End Grid and Cursor Actions ---
+  | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null }
+
+  // --- Brush Size Action ---
+  | { type: 'SET_BRUSH_SIZE'; size: number };
+  // --- End Brush Size Action ---

@@ -36,6 +36,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     primaryColor,
     zoomLevel,
     showGrid,
+    brushSize,
   } = state;
 
   const [redrawNonce, setRedrawNonce] = useState(0);
@@ -66,13 +67,21 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         return null;
     }, [canvasRef, zoomLevel, canvasWidth, canvasHeight]);
 
-  const pencilDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string) => {
-        drawLine(ctx, x0, y0, x1, y1, color, drawPixel);
-    }, []);
-  const eraserDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) => {
-        const clearFunc = (ctx: CanvasRenderingContext2D, x: number, y: number) => clearPixel(ctx, x, y);
-        drawLine(ctx, x0, y0, x1, y1, 'transparent', clearFunc);
-    }, []);
+  // --- Update pencilDraw and eraserDraw to use brushSize ---
+    const pencilDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string) => {
+        // Pass brushSize to drawLine, which will pass it to drawPixel
+        drawLine(ctx, x0, y0, x1, y1, color, drawPixel, brushSize);
+    }, [brushSize]); // Add brushSize as a dependency
+
+    const eraserDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) => {
+        // Custom drawFunc for clearPixel within drawLine
+        const clearFuncWithBrush = (
+            c: CanvasRenderingContext2D, x: number, y: number, _color: string, size: number
+        ) => clearPixel(c, x, y, size);
+        // Pass brushSize to drawLine, which will pass it to clearFuncWithBrush
+        drawLine(ctx, x0, y0, x1, y1, 'transparent', clearFuncWithBrush, brushSize);
+    }, [brushSize]); // Add brushSize as a dependency
+    // ---
   const eyedropperSample = useCallback((logicalCoords: { x: number; y: number }) => {
         console.log(`Eyedropper: Sampling at logical coordinates (${logicalCoords.x}, ${logicalCoords.y})`);
         const activeLayerIndex = layers.findIndex(layer => layer.id === activeLayerId);
@@ -88,6 +97,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             }
         }
     }, [layers, dispatch, activeLayerId]);
+
   const floodFill = useCallback((startX: number, startY: number) => {
     const ctx = activeCtxCache.current;
     const layer = activeLayerCache.current;
@@ -134,8 +144,8 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             isDrawing.current = true;
             lastPoint.current = coords;
             ctx.save();
-            if (selectedTool === 'pencil') { drawPixel(ctx, coords.x, coords.y, primaryColor); }
-            else { clearPixel(ctx, coords.x, coords.y); }
+            if (selectedTool === 'pencil') { drawPixel(ctx, coords.x, coords.y, primaryColor, brushSize); }
+            else { clearPixel(ctx, coords.x, coords.y, brushSize); }
             setRedrawNonce(n => n + 1);
             break;
         case 'eyedropper':
@@ -147,7 +157,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             floodFill(coords.x, coords.y);
             break;
     }
-  }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, eyedropperSample, floodFill]);
+  }, [getLogicalCoords, activeLayerCache, activeCtxCache, selectedTool, primaryColor, eyedropperSample, floodFill, brushSize]);
 
   // --- MODIFIED handlePointerMove ---
   const handlePointerMove = useCallback((event: PointerEvent) => {

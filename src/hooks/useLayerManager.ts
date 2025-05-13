@@ -18,6 +18,7 @@ const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => 
 };
 
 const DEFAULT_CAMERA_PITCH = -35.2644; // Or your preferred default
+const DEFAULT_BRUSH_SIZE = 1; // Default brush size
 
 export const initialAppState: AppState = {
   isInitialized: false, // This is key for showing the modal initially
@@ -36,7 +37,8 @@ export const initialAppState: AppState = {
   cameraPitch: DEFAULT_CAMERA_PITCH, // Initialize if you have this feature
   clipboard: null,
   showGrid: false,
-    cursorCoords: null, // Logical coordinates on canvas
+  cursorCoords: null, // Logical coordinates on canvas
+  brushSize: DEFAULT_BRUSH_SIZE, // Default brush size
 };
 
 const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHistory[]): Pick<AppState, 'history' | 'historyIndex'> => {
@@ -116,6 +118,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
             cameraPitch: loadedState.cameraPitch ?? initialAppState.cameraPitch,
             clipboard: loadedState.clipboard ?? null,
             showGrid: loadedState.showGrid ?? initialAppState.showGrid,
+            brushSize: loadedState.brushSize ?? initialAppState.brushSize,
             cursorCoords: null,
         };
     }
@@ -278,14 +281,13 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     case 'SET_PREVIEW_ROTATION': return { ...state, previewRotation: action.rotation };
     case 'TOGGLE_COLOR_PICKER': return { ...state, isColorPickerOpen: action.open ?? !state.isColorPickerOpen };
     case 'SET_CAMERA_PITCH': return { ...state, cameraPitch: action.pitch };
+    case 'TOGGLE_GRID': return { ...state, showGrid: !state.showGrid };
+    case 'SET_CURSOR_COORDS': return { ...state, cursorCoords: action.coords };
 
-    // --- Handle Grid and Cursor Actions ---
-    case 'TOGGLE_GRID':
-        return { ...state, showGrid: !state.showGrid };
-    case 'SET_CURSOR_COORDS':
-        return { ...state, cursorCoords: action.coords };
-    // --- End Handle Grid and Cursor Actions ---
-    
+    case 'SET_BRUSH_SIZE': 
+        const newBrushSize = Math.max(1, Math.min(32, action.size)); // Clamp between 1 and 32
+        return { ...state, brushSize: newBrushSize };
+        
     default:
       return state;
   }
