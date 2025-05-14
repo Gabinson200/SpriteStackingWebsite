@@ -1,7 +1,8 @@
 // src/hooks/useLayerManager.ts
-import { Reducer } from 'react';
+import type { Reducer } from 'react'; // Changed to type-only import
 import { v4 as uuidv4 } from 'uuid';
-import type { AppState, Layer, LayerAction, Tool, LayerDataForHistory, ClipboardLayerData } from '../state/types';
+// Tool is used in LayerAction, so it's correctly imported as a type here.
+import type { AppState, Layer, LayerAction, LayerDataForHistory, ClipboardLayerData, SerializableAppStateForLoad } from '../state/types';
 import { createOffscreenCanvas } from '../utils/canvasUtils';
 
 const MAX_HISTORY_SIZE = 50;
@@ -17,11 +18,11 @@ const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => 
     return [serializeLayersForHistory(layers)];
 };
 
-const DEFAULT_CAMERA_PITCH = -35.2644; // Or your preferred default
-const DEFAULT_BRUSH_SIZE = 1; // Default brush size
+const DEFAULT_CAMERA_PITCH = -35.2644; // Or your preferred default if using cameraPitch
+const DEFAULT_BRUSH_SIZE = 1;
 
 export const initialAppState: AppState = {
-  isInitialized: false, // This is key for showing the modal initially
+  isInitialized: false,
   canvasWidth: 0,
   canvasHeight: 0,
   layers: [],
@@ -29,16 +30,16 @@ export const initialAppState: AppState = {
   selectedTool: 'pencil',
   primaryColor: '#000000ff',
   zoomLevel: 4,
-  previewOffset: { x: 1, y: 1 }, // User's provided default from previous snippet
+  previewOffset: { x: 1, y: 1 }, // User's provided default
   previewRotation: 0,
   isColorPickerOpen: false,
   history: [],
   historyIndex: -1,
-  cameraPitch: DEFAULT_CAMERA_PITCH, // Initialize if you have this feature
+  cameraPitch: DEFAULT_CAMERA_PITCH, // Assuming you have this feature
   clipboard: null,
-  showGrid: false,
-  cursorCoords: null, // Logical coordinates on canvas
-  brushSize: DEFAULT_BRUSH_SIZE, // Default brush size
+  showGrid: true,
+  cursorCoords: null,
+  brushSize: DEFAULT_BRUSH_SIZE,
 };
 
 const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHistory[]): Pick<AppState, 'history' | 'historyIndex'> => {
@@ -59,9 +60,7 @@ const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHi
 export const layerReducer: Reducer<AppState, LayerAction> = (state, action): AppState => {
   switch (action.type) {
     case 'SHOW_NEW_PROJECT_MODAL':
-        // Reset the entire state to its initial uninitialized form
-        // This will cause App.tsx to show the StartupModal
-        return { ...initialAppState }; // isInitialized is false in initialAppState
+        return { ...initialAppState };
 
     case 'INIT_PROJECT': {
       const { width, height, layerCount } = action;
@@ -74,11 +73,9 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         });
       }
       const reversedInitialLayers = initialLayers.reverse();
-      // When initializing a project, ensure all other relevant fields are also set from a clean slate
-      // but keep isInitialized true.
       return {
-        ...initialAppState, // Start with all defaults (like cameraPitch, clipboard: null etc.)
-        isInitialized: true, // This is the key difference from SHOW_NEW_PROJECT_MODAL
+        ...initialAppState,
+        isInitialized: true,
         canvasWidth: width,
         canvasHeight: height,
         layers: reversedInitialLayers,
@@ -86,13 +83,11 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         zoomLevel: calculateInitialZoom(width, height),
         history: createInitialHistoryEntry(reversedInitialLayers),
         historyIndex: 0,
-        // Explicitly carry over any non-project specific settings if needed,
-        // or ensure initialAppState has suitable defaults.
       };
     }
 
     case 'LOAD_STATE': {
-        const loadedState = action.state;
+        const loadedState = action.state as SerializableAppStateForLoad; // Cast for easier access
         let reconstructedLayers: Layer[] = [];
         if (loadedState.layers && loadedState.canvasWidth && loadedState.canvasHeight) {
             reconstructedLayers = loadedState.layers.map(layerData => ({
@@ -100,20 +95,22 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
                 offscreenCanvas: null, // Mark for hydration
             } as Layer));
         }
-        const historyFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.history.map(snapshot => snapshot.map(layerInHistory => ({ ...layerInHistory }))) // Deep copy history
+        const historyFromLoad = loadedState.history
+            ? loadedState.history.map(snapshot => snapshot.map(layerInHistory => ({ ...layerInHistory })))
             : createInitialHistoryEntry(reconstructedLayers);
-        const historyIndexFromLoad = loadedState.history && loadedState.historyIndex !== undefined
-            ? loadedState.historyIndex : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
+        const historyIndexFromLoad = loadedState.historyIndex !== undefined && loadedState.historyIndex !== null
+            ? loadedState.historyIndex
+            : (historyFromLoad.length > 0 ? historyFromLoad.length - 1 : -1);
+
         return {
-            ...initialAppState, // Start with defaults
-            ...loadedState,    // Override with loaded data
+            ...initialAppState,
+            ...(loadedState as Partial<AppState>), // Spread known AppState compatible fields
             layers: reconstructedLayers,
-            isInitialized: true, // Mark as initialized after loading
+            isInitialized: true,
             canvasWidth: loadedState.canvasWidth ?? initialAppState.canvasWidth,
             canvasHeight: loadedState.canvasHeight ?? initialAppState.canvasHeight,
             activeLayerId: loadedState.activeLayerId ?? reconstructedLayers[0]?.id ?? null,
-            history: historyFromLoad as LayerDataForHistory[][],
+            history: historyFromLoad,
             historyIndex: historyIndexFromLoad,
             cameraPitch: loadedState.cameraPitch ?? initialAppState.cameraPitch,
             clipboard: loadedState.clipboard ?? null,
@@ -122,8 +119,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
             cursorCoords: null,
         };
     }
-
-    // ... (ADD_LAYER, DELETE_LAYER, REORDER_LAYERS, UPDATE_LAYER_CANVAS - same as before) ...
     case 'ADD_LAYER': {
       if (!state.isInitialized) return state;
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
@@ -137,18 +132,16 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     }
     case 'DELETE_LAYER': {
       if (state.layers.length <= 1 && action.type === 'DELETE_LAYER') {
-          alert("Cannot delete the last layer.");
-          return state;
+          alert("Cannot delete the last layer."); return state;
       }
       if (state.layers.length === 0) return state;
       const layerIdToDelete = action.id || state.activeLayerId;
       if (!layerIdToDelete || !state.layers.find(l => l.id === layerIdToDelete)) {
-          console.warn("DELETE_LAYER: Layer to delete not found:", layerIdToDelete);
           return state;
       }
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
       const layersAfterDelete = state.layers.filter(layer => layer.id !== layerIdToDelete);
-      let newActiveLayerId = state.activeLayerId;
+      let newActiveLayerId: string | null = state.activeLayerId;
       if (state.activeLayerId === layerIdToDelete || layersAfterDelete.length === 0) {
           const deletedIndex = state.layers.findIndex(l => l.id === layerIdToDelete);
           newActiveLayerId = layersAfterDelete[Math.max(0, deletedIndex -1)]?.id || layersAfterDelete[0]?.id || null;
@@ -172,8 +165,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         ),
       };
     }
-
-
     case 'SET_LAYER_VISIBILITY':
     case 'SET_LAYER_LOCK':
     case 'SET_LAYER_OPACITY':
@@ -187,7 +178,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
                 } return layer;
             }),
         };
-
     case 'UNDO': {
         if (state.historyIndex <= 0) return state;
         const newHistoryIndex = state.historyIndex - 1;
@@ -210,7 +200,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         return { ...state, layers: state.layers.map(layer => layer.id === action.layerId ? { ...layer, offscreenCanvas: action.canvas } : layer ),
         };
     }
-
     case 'COPY_LAYER': {
         if (!state.activeLayerId) return state;
         const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
@@ -222,7 +211,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         };
         return { ...state, clipboard: clipboardData };
     }
-
     case 'CUT_LAYER': {
         if (!state.activeLayerId) return state;
         const activeLayerToCut = state.layers.find(l => l.id === state.activeLayerId);
@@ -238,14 +226,14 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         }
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
         const layersAfterCut = state.layers.filter(layer => layer.id !== state.activeLayerId);
-        let newActiveLayerId = state.activeLayerId;
+        // --- Explicitly type newActiveLayerId ---
+        let newActiveLayerId: string | null = state.activeLayerId;
         const deletedIndex = state.layers.findIndex(l => l.id === state.activeLayerId);
         if (state.activeLayerId === activeLayerToCut.id || layersAfterCut.length === 0) {
              newActiveLayerId = layersAfterCut[Math.max(0, deletedIndex -1)]?.id || layersAfterCut[0]?.id || null;
         }
         return { ...state, ...historyUpdate, layers: layersAfterCut, activeLayerId: newActiveLayerId, clipboard: clipboardData };
     }
-
     case 'PASTE_LAYER': {
         if (!state.clipboard || !state.isInitialized) return state;
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
@@ -272,7 +260,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newLayers = [ ...state.layers.slice(0, insertAtIndex), newPastedLayer, ...state.layers.slice(insertAtIndex) ];
         return { ...state, ...historyUpdate, layers: newLayers, activeLayerId: newLayerId };
     }
-
     case 'SELECT_LAYER': return { ...state, activeLayerId: action.id };
     case 'SET_PRIMARY_COLOR': return { ...state, primaryColor: action.color };
     case 'SET_SELECTED_TOOL': return { ...state, selectedTool: action.tool };
@@ -283,11 +270,10 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     case 'SET_CAMERA_PITCH': return { ...state, cameraPitch: action.pitch };
     case 'TOGGLE_GRID': return { ...state, showGrid: !state.showGrid };
     case 'SET_CURSOR_COORDS': return { ...state, cursorCoords: action.coords };
-
-    case 'SET_BRUSH_SIZE': 
-        const newBrushSize = Math.max(1, Math.min(32, action.size)); // Clamp between 1 and 32
+    case 'SET_BRUSH_SIZE':
+        const newBrushSize = Math.max(1, Math.min(action.size, 32));
         return { ...state, brushSize: newBrushSize };
-        
+
     default:
       return state;
   }

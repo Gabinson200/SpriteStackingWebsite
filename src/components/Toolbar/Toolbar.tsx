@@ -1,48 +1,50 @@
 // src/components/Toolbar/Toolbar.tsx
 import React from 'react';
+// AppState is removed from this import line as ProjectFileData will be redefined
+import type { Tool, LayerDataForHistory, ClipboardLayerData, SerializableAppStateForLoad } from '../../state/types';
 import { useAppContext } from '../../state/AppContext';
-import type { Tool, AppState } from '../../state/types';
 import { exportCanvasAsPNG } from '../../utils/fileUtils';
 import { exportLayersToLvglH } from '../../utils/lvglExporter';
 import { downloadTextFile, openJsonFile } from '../../utils/fileUtils';
 import { serializeLayersForHistory } from '../../hooks/useLayerManager';
 
-interface ProjectFileData extends Omit<AppState, 'layers' | 'isInitialized' | 'history' | 'cursorCoords'> {
-    layers: ReturnType<typeof serializeLayersForHistory>;
-    history: ReturnType<typeof serializeLayersForHistory>[];
+// Redefined ProjectFileData to not directly Omit<AppState, ...> in this file
+// It now explicitly lists the properties it expects.
+// This should align with the actual data structure being saved in handleSaveProject.
+interface ProjectFileData {
+    canvasWidth: number;
+    canvasHeight: number;
+    layers: LayerDataForHistory[];
+    activeLayerId: string | null;
+    selectedTool: Tool;
+    primaryColor: string;
+    zoomLevel: number;
+    previewOffset: { x: number; y: number }; // Kept from AppState
+    previewRotation: number; // Kept from AppState
+    cameraPitch?: number; // Kept from AppState, optional
+    history: LayerDataForHistory[][];
+    historyIndex: number;
+    clipboard: ClipboardLayerData | null;
+    showGrid: boolean;
+    brushSize: number;
+    // Note: isColorPickerOpen and other purely transient UI states are intentionally omitted.
 }
 
-// --- Updated Brush Sizes ---
-const BRUSH_SIZES = [1, 3, 5, 7]; // Changed to 1, 3, 5, 7
-// ---
+
+const BRUSH_SIZES = [1, 3, 5, 7];
 
 export const Toolbar: React.FC = () => {
   const { state, dispatch } = useAppContext();
   const {
-    selectedTool,
-    primaryColor,
-    layers,
-    zoomLevel,
-    history,
-    historyIndex,
-    clipboard,
-    activeLayerId,
-    canvasWidth,
-    canvasHeight,
-    cameraPitch,
-    previewOffset,
-    previewRotation,
-    showGrid,
-    brushSize,
+    selectedTool, primaryColor, layers, zoomLevel, history, historyIndex,
+    clipboard, activeLayerId, canvasWidth, canvasHeight,
+    // Removed cameraPitch, previewOffset, previewRotation from destructuring here
+    // as they are only used in handleSaveProject and will be accessed via `state.`
+    showGrid, brushSize,
   } = state;
 
-  const setTool = (tool: Tool) => {
-    dispatch({ type: 'SET_SELECTED_TOOL', tool });
-  };
-
-  const handleSetBrushSize = (size: number) => {
-    dispatch({ type: 'SET_BRUSH_SIZE', size });
-  };
+  const setTool = (tool: Tool) => dispatch({ type: 'SET_SELECTED_TOOL', tool });
+  const handleSetBrushSize = (size: number) => dispatch({ type: 'SET_BRUSH_SIZE', size });
 
   const handleExportPng = async () => {
     if (!layers || layers.length === 0) { alert("No layers to export."); return; }
@@ -72,39 +74,55 @@ export const Toolbar: React.FC = () => {
         dispatch({ type: 'SHOW_NEW_PROJECT_MODAL' });
     }
   };
+
   const handleSaveProject = () => {
     try {
+        // Access cameraPitch, previewOffset, previewRotation directly from state object
         const projectData: ProjectFileData = {
-            canvasWidth: state.canvasWidth, canvasHeight: state.canvasHeight,
-            layers: serializeLayersForHistory(state.layers), activeLayerId: state.activeLayerId,
-            selectedTool: state.selectedTool, primaryColor: state.primaryColor,
-            zoomLevel: state.zoomLevel, previewOffset: state.previewOffset,
-            previewRotation: state.previewRotation, cameraPitch: state.cameraPitch,
-            history: state.history, historyIndex: state.historyIndex,
-            clipboard: state.clipboard, showGrid: state.showGrid,
-            brushSize: state.brushSize, // Save brushSize
+            canvasWidth: state.canvasWidth,
+            canvasHeight: state.canvasHeight,
+            layers: serializeLayersForHistory(state.layers),
+            activeLayerId: state.activeLayerId,
+            selectedTool: state.selectedTool,
+            primaryColor: state.primaryColor,
+            zoomLevel: state.zoomLevel,
+            previewOffset: state.previewOffset,       // Used state.previewOffset
+            previewRotation: state.previewRotation,   // Used state.previewRotation
+            cameraPitch: state.cameraPitch,           // Used state.cameraPitch
+            history: state.history,
+            historyIndex: state.historyIndex,
+            clipboard: state.clipboard,
+            showGrid: state.showGrid,
+            brushSize: state.brushSize,
         };
         const jsonString = JSON.stringify(projectData, null, 2);
         downloadTextFile(jsonString, "sprite_stack_project.ssp", "application/json");
     } catch (error) { console.error("Error saving project:", error); alert("Failed to save project. See console for details."); }
   };
+
   const handleLoadProject = async () => {
     try {
-        const loadedData = await openJsonFile<ProjectFileData>(".ssp");
-        if (loadedData) {
-            dispatch({ type: 'LOAD_STATE', state: loadedData as Partial<AppState> });
+        const loadedDataFromFile = await openJsonFile<ProjectFileData>(".ssp");
+        if (loadedDataFromFile) {
+            const stateToLoad: SerializableAppStateForLoad = { ...loadedDataFromFile };
+            dispatch({ type: 'LOAD_STATE', state: stateToLoad });
             alert("Project loaded successfully!");
         }
     } catch (error) { console.error("Error loading project:", error); alert(`Failed to load project: ${error instanceof Error ? error.message : "Unknown error"}`);}
   };
 
-
   const ToolButton: React.FC<{ tool: Tool; label: string; currentTool: Tool }> = ({ tool, label, currentTool }) => (
     <button
       onClick={() => setTool(tool)}
-      className={`px-3 py-1 border rounded ${ currentTool === tool ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500'} transition duration-150 ease-in-out text-sm`}
+      className={`px-3 py-1 border rounded ${
+        currentTool === tool
+          ? 'bg-indigo-600 text-white border-indigo-700'
+          : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500'
+      } transition duration-150 ease-in-out text-sm`}
       title={label}
-    > {label} </button>
+    >
+      {label}
+    </button>
   );
 
   const canUndo = historyIndex > 0;
@@ -141,7 +159,7 @@ export const Toolbar: React.FC = () => {
                     className={`px-2 py-0.5 border rounded text-xs ${
                         brushSize === size
                             ? 'bg-indigo-500 text-white border-indigo-600'
-                            : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500'
+                            : 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500'
                     }`}
                     title={`${size}px Brush`}
                 >
@@ -150,7 +168,6 @@ export const Toolbar: React.FC = () => {
             ))}
         </div>
       )}
-
 
       {/* Undo/Redo Buttons */}
       <div className="flex space-x-1 ml-2 border-l border-gray-300 dark:border-gray-600 pl-2">

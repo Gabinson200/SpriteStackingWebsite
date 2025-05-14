@@ -17,7 +17,6 @@ export interface Layer extends LayerDataForHistory {
 
 export type ClipboardLayerData = Omit<LayerDataForHistory, 'id'> & { originalId?: string };
 
-
 export interface AppState {
   isInitialized: boolean;
   canvasWidth: number;
@@ -36,15 +35,23 @@ export interface AppState {
   clipboard: ClipboardLayerData | null;
   showGrid: boolean;
   cursorCoords: { x: number; y: number } | null;
-
-  // --- Brush Size State ---
-  brushSize: number; // e.g., 1 for 1x1, 2 for 2x2, etc.
-  // --- End Brush Size State ---
+  brushSize: number;
 }
+
+// This interface is used for the payload of the LOAD_STATE action.
+// It reflects the structure of data coming from a file or localStorage
+// before it's fully processed by the reducer into the AppState.
+// --- Added export keyword here ---
+export interface SerializableAppStateForLoad extends Omit<Partial<AppState>, 'layers' | 'history'> {
+    layers?: LayerDataForHistory[]; // Layers are initially just data
+    history?: LayerDataForHistory[][]; // History is also just data
+}
+// --- End export keyword addition ---
+
 
 export type LayerAction =
   | { type: 'INIT_PROJECT'; width: number; height: number; layerCount: number }
-  | { type: 'LOAD_STATE'; state: Partial<AppState> }
+  | { type: 'LOAD_STATE'; state: SerializableAppStateForLoad } // Use the specific type here
   | { type: 'ADD_LAYER' }
   | { type: 'DELETE_LAYER'; id: string }
   | { type: 'SELECT_LAYER'; id: string }
@@ -70,7 +77,4 @@ export type LayerAction =
   | { type: 'SHOW_NEW_PROJECT_MODAL' }
   | { type: 'TOGGLE_GRID' }
   | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null }
-
-  // --- Brush Size Action ---
   | { type: 'SET_BRUSH_SIZE'; size: number };
-  // --- End Brush Size Action ---

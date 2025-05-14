@@ -1,5 +1,7 @@
 // src/state/AppContext.tsx
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer} from 'react';
+import type { ReactNode } from 'react';
+
 import type{ AppState, LayerAction } from './types';
 import { layerReducer, initialAppState } from '../hooks/useLayerManager'; // We'll define this reducer soon
 

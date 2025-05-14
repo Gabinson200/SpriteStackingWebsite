@@ -1,5 +1,7 @@
 // src/hooks/useLocalStorage.ts
-import { useState, useEffect, Dispatch, SetStateAction } from 'react';
+import { useState, useEffect } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
+
 
 function useLocalStorage<T>(key: string, initialValue: T): [T, Dispatch<SetStateAction<T>>] {
   // Get initial value from localStorage or use the provided initialValue
