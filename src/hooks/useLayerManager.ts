@@ -1,7 +1,6 @@
 // src/hooks/useLayerManager.ts
-import type { Reducer } from 'react'; // Changed to type-only import
+import type { Reducer } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-// Tool is used in LayerAction, so it's correctly imported as a type here.
 import type { AppState, Layer, LayerAction, LayerDataForHistory, ClipboardLayerData, SerializableAppStateForLoad } from '../state/types';
 import { createOffscreenCanvas } from '../utils/canvasUtils';
 
@@ -10,7 +9,7 @@ const MAX_HISTORY_SIZE = 50;
 export const serializeLayersForHistory = (layers: Layer[]): LayerDataForHistory[] => {
     return layers.map(({ offscreenCanvas, ...rest }) => {
         const currentDataURL = offscreenCanvas ? offscreenCanvas.toDataURL() : rest.dataURL;
-        return { ...rest, dataURL: currentDataURL };
+        return { ...rest, dataURL: currentDataURL, rotation: rest.rotation };
     });
 };
 
@@ -18,7 +17,7 @@ const createInitialHistoryEntry = (layers: Layer[]): LayerDataForHistory[][] => 
     return [serializeLayersForHistory(layers)];
 };
 
-const DEFAULT_CAMERA_PITCH = -35.2644; // Or your preferred default if using cameraPitch
+const DEFAULT_CAMERA_PITCH = -35.2644;
 const DEFAULT_BRUSH_SIZE = 1;
 
 export const initialAppState: AppState = {
@@ -30,12 +29,12 @@ export const initialAppState: AppState = {
   selectedTool: 'pencil',
   primaryColor: '#000000ff',
   zoomLevel: 4,
-  previewOffset: { x: 1, y: 1 }, // User's provided default
+  previewOffset: { x: 1, y: 1 },
   previewRotation: 0,
   isColorPickerOpen: false,
   history: [],
   historyIndex: -1,
-  cameraPitch: DEFAULT_CAMERA_PITCH, // Assuming you have this feature
+  cameraPitch: DEFAULT_CAMERA_PITCH,
   clipboard: null,
   showGrid: true,
   cursorCoords: null,
@@ -57,6 +56,28 @@ const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHi
     return { history: newHistory, historyIndex: newHistoryIndex };
 };
 
+// Helper function to rotate the canvas content
+const rotateCanvasContent = (canvas: HTMLCanvasElement, rotation: number): HTMLCanvasElement => {
+    const { width, height } = canvas;
+    const rotatedCanvas = createOffscreenCanvas(width, height);
+    const ctx = rotatedCanvas.getContext('2d');
+
+    if (!ctx) {
+        console.error("Could not get 2D context for rotation.");
+        return canvas; // Return original canvas if context is not available
+    }
+
+    // Translate to the center of the canvas
+    ctx.translate(width / 2, height / 2);
+    // Rotate the context
+    ctx.rotate(rotation * Math.PI / 180);
+    // Draw the original canvas content onto the rotated context
+    ctx.drawImage(canvas, -width / 2, -height / 2);
+
+    return rotatedCanvas;
+};
+
+
 export const layerReducer: Reducer<AppState, LayerAction> = (state, action): AppState => {
   switch (action.type) {
     case 'SHOW_NEW_PROJECT_MODAL':
@@ -69,7 +90,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newCanvas = createOffscreenCanvas(width, height);
         initialLayers.push({
           id: uuidv4(), name: `Layer ${i + 1}`, isVisible: true, isLocked: false, opacity: 1.0,
-          offscreenCanvas: newCanvas, dataURL: newCanvas.toDataURL(),
+          offscreenCanvas: newCanvas, dataURL: newCanvas.toDataURL(), rotation: 0, // Initialize rotation
         });
       }
       const reversedInitialLayers = initialLayers.reverse();
@@ -93,10 +114,11 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
             reconstructedLayers = loadedState.layers.map(layerData => ({
                 ...layerData,
                 offscreenCanvas: null, // Mark for hydration
+                rotation: layerData.rotation ?? 0, // Ensure rotation is loaded, default to 0
             } as Layer));
         }
         const historyFromLoad = loadedState.history
-            ? loadedState.history.map(snapshot => snapshot.map(layerInHistory => ({ ...layerInHistory })))
+            ? loadedState.history.map(snapshot => snapshot.map(layerInHistory => ({ ...layerInHistory, rotation: layerInHistory.rotation ?? 0 }))) // Ensure history includes rotation
             : createInitialHistoryEntry(reconstructedLayers);
         const historyIndexFromLoad = loadedState.historyIndex !== undefined && loadedState.historyIndex !== null
             ? loadedState.historyIndex
@@ -125,7 +147,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
       const newCanvas = createOffscreenCanvas(state.canvasWidth, state.canvasHeight);
       const newLayer: Layer = {
         id: uuidv4(), name: `Layer ${state.layers.length + 1}`, isVisible: true, isLocked: false, opacity: 1.0,
-        offscreenCanvas: newCanvas, dataURL: newCanvas.toDataURL(),
+        offscreenCanvas: newCanvas, dataURL: newCanvas.toDataURL(), rotation: 0, // Initialize rotation
       };
       const newLayers = [newLayer, ...state.layers];
       return { ...state, ...historyUpdate, layers: newLayers, activeLayerId: newLayer.id };
@@ -142,18 +164,18 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
       const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
       const layersAfterDelete = state.layers.filter(layer => layer.id !== layerIdToDelete);
       let newActiveLayerId: string | null = state.activeLayerId;
+      const deletedIndex = state.layers.findIndex(l => l.id === layerIdToDelete);
       if (state.activeLayerId === layerIdToDelete || layersAfterDelete.length === 0) {
-          const deletedIndex = state.layers.findIndex(l => l.id === layerIdToDelete);
-          newActiveLayerId = layersAfterDelete[Math.max(0, deletedIndex -1)]?.id || layersAfterDelete[0]?.id || null;
+           newActiveLayerId = layersAfterDelete[Math.max(0, deletedIndex -1)]?.id || layersAfterDelete[0]?.id || null;
       }
       return { ...state, ...historyUpdate, layers: layersAfterDelete, activeLayerId: newActiveLayerId };
     }
     case 'REORDER_LAYERS': {
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
-        const { sourceIndex, destinationIndex } = action;
+        const { sourceIndex: D, destinationIndex: N } = action;
         const layers = Array.from(state.layers);
-        const [removed] = layers.splice(sourceIndex, 1);
-        layers.splice(destinationIndex, 0, removed);
+        const [removed] = layers.splice(D, 1);
+        layers.splice(N, 0, removed);
         return { ...state, ...historyUpdate, layers };
     }
     case 'UPDATE_LAYER_CANVAS': {
@@ -182,7 +204,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         if (state.historyIndex <= 0) return state;
         const newHistoryIndex = state.historyIndex - 1;
         const historicalLayersData = state.history[newHistoryIndex];
-        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null }));
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null, rotation: data.rotation ?? 0 })); // Ensure rotation is restored
         return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
             activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
         };
@@ -191,7 +213,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         if (state.historyIndex >= state.history.length - 1 || state.historyIndex < 0) return state;
         const newHistoryIndex = state.historyIndex + 1;
         const historicalLayersData = state.history[newHistoryIndex];
-        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null }));
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null, rotation: data.rotation ?? 0 })); // Ensure rotation is restored
         return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
             activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
         };
@@ -208,6 +230,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const clipboardData: ClipboardLayerData = {
             name: `${activeLayer.name} Copy`, isVisible: activeLayer.isVisible, isLocked: false,
             opacity: activeLayer.opacity, dataURL: dataURLToCopy, originalId: activeLayer.id,
+            rotation: activeLayer.rotation, // Include rotation
         };
         return { ...state, clipboard: clipboardData };
     }
@@ -219,6 +242,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const clipboardData: ClipboardLayerData = {
             name: activeLayerToCut.name, isVisible: activeLayerToCut.isVisible, isLocked: false,
             opacity: activeLayerToCut.opacity, dataURL: dataURLToCopy, originalId: activeLayerToCut.id,
+            rotation: activeLayerToCut.rotation, // Include rotation
         };
         if (state.layers.length === 1) {
             alert("Copied last layer. Cannot cut the last layer.");
@@ -226,7 +250,6 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         }
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
         const layersAfterCut = state.layers.filter(layer => layer.id !== state.activeLayerId);
-        // --- Explicitly type newActiveLayerId ---
         let newActiveLayerId: string | null = state.activeLayerId;
         const deletedIndex = state.layers.findIndex(l => l.id === state.activeLayerId);
         if (state.activeLayerId === activeLayerToCut.id || layersAfterCut.length === 0) {
@@ -248,7 +271,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newPastedLayer: Layer = {
             id: newLayerId, name: newLayerName, isVisible: pastedLayerData.isVisible,
             isLocked: false, opacity: pastedLayerData.opacity, dataURL: pastedLayerData.dataURL,
-            offscreenCanvas: null,
+            offscreenCanvas: null, rotation: pastedLayerData.rotation ?? 0, // Include rotation, default to 0
         };
         let insertAtIndex = 0;
         if (state.activeLayerId) {
@@ -267,12 +290,79 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
     case 'SET_PREVIEW_OFFSET': return { ...state, previewOffset: action.offset };
     case 'SET_PREVIEW_ROTATION': return { ...state, previewRotation: action.rotation };
     case 'TOGGLE_COLOR_PICKER': return { ...state, isColorPickerOpen: action.open ?? !state.isColorPickerOpen };
+    case 'UNDO': {
+        if (state.historyIndex <= 0) return state;
+        const newHistoryIndex = state.historyIndex - 1;
+        const historicalLayersData = state.history[newHistoryIndex];
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null, rotation: data.rotation ?? 0 })); // Ensure rotation is restored
+        return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
+            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
+        };
+    }
+    case 'REDO': {
+        if (state.historyIndex >= state.history.length - 1 || state.historyIndex < 0) return state;
+        const newHistoryIndex = state.historyIndex + 1;
+        const historicalLayersData = state.history[newHistoryIndex];
+        const restoredLayers: Layer[] = historicalLayersData.map(data => ({ ...data, offscreenCanvas: null, rotation: data.rotation ?? 0 })); // Ensure rotation is restored
+        return { ...state, layers: restoredLayers, historyIndex: newHistoryIndex,
+            activeLayerId: state.activeLayerId && restoredLayers.find(l => l.id === state.activeLayerId) ? state.activeLayerId : restoredLayers[0]?.id || null,
+        };
+    }
+    case 'INTERNAL_UPDATE_LAYER_OFFSCREEN_CANVAS': {
+        return { ...state, layers: state.layers.map(layer => layer.id === action.layerId ? { ...layer, offscreenCanvas: action.canvas } : layer ),
+        };
+    }
     case 'SET_CAMERA_PITCH': return { ...state, cameraPitch: action.pitch };
     case 'TOGGLE_GRID': return { ...state, showGrid: !state.showGrid };
     case 'SET_CURSOR_COORDS': return { ...state, cursorCoords: action.coords };
     case 'SET_BRUSH_SIZE':
         const newBrushSize = Math.max(1, Math.min(action.size, 32));
         return { ...state, brushSize: newBrushSize };
+
+    case 'ROTATE_LEFT': {
+        if (!state.activeLayerId) return state;
+        const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+        const rotatedLayers = state.layers.map(layer => {
+            if (layer.id === state.activeLayerId) {
+                if (!layer.offscreenCanvas) return layer; // Cannot rotate if no canvas
+
+                // Rotate the canvas content
+                const newRotation = (layer.rotation - 90 + 360) % 360;
+                const rotatedCanvas = rotateCanvasContent(layer.offscreenCanvas, -90); // Rotate content -90 degrees
+
+                return {
+                    ...layer,
+                    rotation: newRotation,
+                    offscreenCanvas: rotatedCanvas,
+                    dataURL: rotatedCanvas.toDataURL() // Update data URL
+                };
+            }
+            return layer;
+        });
+        return { ...state, ...historyUpdate, layers: rotatedLayers };
+    }
+    case 'ROTATE_RIGHT': {
+        if (!state.activeLayerId) return state;
+        const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+        const rotatedLayers = state.layers.map(layer => {
+            if (layer.id === state.activeLayerId) {
+                 if (!layer.offscreenCanvas) return layer; // Cannot rotate if no canvas
+
+                // Rotate the canvas content
+                const newRotation = (layer.rotation + 90) % 360;
+                const rotatedCanvas = rotateCanvasContent(layer.offscreenCanvas, 90); // Rotate content +90 degrees
+
+                return {
+                    ...layer,
+                    rotation: newRotation,
+                    offscreenCanvas: rotatedCanvas,
+                    dataURL: rotatedCanvas.toDataURL() // Update data URL
+                };
+            }
+            return layer;
+        });
+        return { ...state, ...historyUpdate, layers: rotatedLayers };
+    }
 
     default:
       return state;

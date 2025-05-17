@@ -65,8 +65,7 @@ export const Toolbar: React.FC = () => {
     if (visibleLayers.length === 0) { alert("No visible layers with content to export to LVGL."); return; }
     try {
         exportLayersToLvglH(visibleLayers, canvasWidth, canvasHeight, true, "sprite_stack_images");
-        alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`);
-    } catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
+        alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`)} catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
   };
 
   const handleNewProject = () => {
@@ -111,6 +110,15 @@ export const Toolbar: React.FC = () => {
     } catch (error) { console.error("Error loading project:", error); alert(`Failed to load project: ${error instanceof Error ? error.message : "Unknown error"}`);}
   };
 
+  const handleRotateLeft = () => {
+      dispatch({ type: 'ROTATE_LEFT' });
+  };
+
+  const handleRotateRight = () => {
+      dispatch({ type: 'ROTATE_RIGHT' });
+  };
+
+
   const ToolButton: React.FC<{ tool: Tool; label: string; currentTool: Tool }> = ({ tool, label, currentTool }) => (
     <button
       onClick={() => setTool(tool)}
@@ -128,8 +136,9 @@ export const Toolbar: React.FC = () => {
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1 && historyIndex !== -1;
   const canCopy = !!activeLayerId;
-  const canCut = !!activeLayerId && layers.length > 0;
+  const canCut = !!activeLayerId && layers.length > 1; // Can't cut the last layer
   const canPaste = !!clipboard;
+  const canRotate = !!activeLayerId && layers.find(l => l.id === activeLayerId)?.offscreenCanvas !== null; // Can only rotate if active layer exists and has a canvas
 
   return (
     <div className="bg-gray-100 dark:bg-gray-800 p-2 shadow-md flex items-center space-x-3 border-b border-gray-300 dark:border-gray-700 flex-wrap">
@@ -181,7 +190,13 @@ export const Toolbar: React.FC = () => {
         <button onClick={() => dispatch({ type: 'CUT_LAYER' })} disabled={!canCut} className={`px-3 py-1 border rounded text-sm transition-colors ${ canCut ? 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 cursor-not-allowed'}`} title="Cut Layer (Ctrl+X)"> Cut </button>
         <button onClick={() => dispatch({ type: 'PASTE_LAYER' })} disabled={!canPaste} className={`px-3 py-1 border rounded text-sm transition-colors ${ canPaste ? 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 cursor-not-allowed'}`} title="Paste Layer (Ctrl+V)"> Paste </button>
       </div>
-      
+
+       {/* Rotate Buttons */}
+      <div className="flex space-x-1 border-l border-gray-300 dark:border-gray-600 pl-2 ml-2">
+        <button onClick={handleRotateLeft} disabled={!canRotate} className={`px-3 py-1 border rounded text-sm transition-colors ${ canRotate ? 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 cursor-not-allowed'}`} title="Rotate Left 90°"> Rotate Left </button>
+        <button onClick={handleRotateRight} disabled={!canRotate} className={`px-3 py-1 border rounded text-sm transition-colors ${ canRotate ? 'bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 cursor-not-allowed'}`} title="Rotate Right 90°"> Rotate Right </button>
+      </div>
+
       {/* Show Grid Checkbox */}
       <div className="flex items-center space-x-1 ml-2 border-l border-gray-300 dark:border-gray-600 pl-2">
         <input type="checkbox" id="showGridCheckbox" checked={showGrid} onChange={() => dispatch({ type: 'TOGGLE_GRID' })} className="form-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-indigo-500"/>

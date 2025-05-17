@@ -1,8 +1,6 @@
 // src/hooks/useCanvasDrawing.ts
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useAppContext } from '../state/AppContext';
-// Removed 'Tool' from this import as it's not directly used as a type annotation here.
-// 'selectedTool' from state is already typed via AppState.
 import type { Layer } from '../state/types';
 import { parseColor } from '../utils/colorUtils';
 import {
@@ -13,13 +11,13 @@ import {
   getPixelFromImageData,
   setPixelInImageData,
   areColorsEqual,
-  type RgbaPixel, // RgbaPixel is now exported from canvasUtils.ts
+  type RgbaPixel,
   drawCheckerboard,
 } from '../utils/canvasUtils';
 
 interface UseCanvasDrawingProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  containerRef: React.RefObject<HTMLDivElement | null>; // Kept, with a placeholder use
+  containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
 const MIN_ZOOM = 0.1;
@@ -28,7 +26,6 @@ const ZOOM_SENSITIVITY = 0.0025;
 const GRID_VISIBILITY_ZOOM_THRESHOLD = 4;
 
 export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingProps) {
-  // Placeholder use for containerRef to satisfy linter if it's for future use
   if (containerRef && !containerRef.current) {
     // console.log("Container ref is not yet available, or not used in this hook yet.");
   }
@@ -48,7 +45,7 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
       activeLayerCache.current = layers.find(l => l.id === activeLayerId) || null;
       activeCtxCache.current = activeLayerCache.current?.offscreenCanvas?.getContext('2d') || null;
       if (activeCtxCache.current) {
-          activeCtxCache.current.imageSmoothingEnabled = false;
+          activeCtxCache.imageSmoothingEnabled = false;
       }
   }, [activeLayerId, layers]);
 
@@ -58,13 +55,49 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
         const rect = canvas.getBoundingClientRect();
         const canvasX = (event.clientX - rect.left);
         const canvasY = (event.clientY - rect.top);
-        const logicalX = Math.floor(canvasX / zoomLevel);
-        const logicalY = Math.floor(canvasY / zoomLevel);
+
+        // --- Apply Inverse Rotation for Coordinate Transformation ---
+        // We need to transform the mouse coordinates on the potentially rotated
+        // main canvas back to the un-rotated coordinate system of the layer's content.
+        const activeLayer = layers.find(l => l.id === activeLayerId);
+        const rotation = activeLayer?.rotation ?? 0;
+
+        let logicalX = canvasX / zoomLevel;
+        let logicalY = canvasY / zoomLevel;
+
+        if (rotation !== 0) {
+            // Translate coordinates to be relative to the canvas center
+            const centerX = canvasWidth / 2;
+            const centerY = canvasHeight / 2;
+            const translatedX = logicalX - centerX;
+            const translatedY = logicalY - centerY;
+
+            // Apply inverse rotation (clockwise for left rotation, counter-clockwise for right)
+            // The rotation stored in state is the visual rotation (clockwise for right rotate button).
+            // To get back to the original coordinates, we need to rotate in the opposite direction.
+            const inverseRotationInRadians = -rotation * Math.PI / 180;
+            const cos = Math.cos(inverseRotationInRadians);
+            const sin = Math.sin(inverseRotationInRadians);
+
+            const rotatedX = translatedX * cos - translatedY * sin;
+            const rotatedY = translatedX * sin + translatedY * cos;
+
+            // Translate back to the original coordinate system
+            logicalX = rotatedX + centerX;
+            logicalY = rotatedY + centerY;
+        }
+        // --- End Apply Inverse Rotation ---
+
+
+        logicalX = Math.floor(logicalX);
+        logicalY = Math.floor(logicalY);
+
+
         if (logicalX >= 0 && logicalX < canvasWidth && logicalY >= 0 && logicalY < canvasHeight) {
             return { x: logicalX, y: logicalY };
         }
         return null;
-    }, [canvasRef, zoomLevel, canvasWidth, canvasHeight]);
+    }, [canvasRef, zoomLevel, canvasWidth, canvasHeight, layers, activeLayerId]);
 
   const pencilDraw = useCallback((ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, color: string) => {
         drawLine(ctx, x0, y0, x1, y1, color, drawPixel, brushSize);
@@ -76,11 +109,15 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
   const eyedropperSample = useCallback((logicalCoords: { x: number; y: number }) => {
         const activeLayerIndex = layers.findIndex(layer => layer.id === activeLayerId);
         if (activeLayerIndex === -1) { return; }
+        // When eyedropping, we sample from the composited view of layers *above* the active one,
+        // but we need to sample based on the logical coordinates of the active layer's canvas.
+        // The getPixelColor function already handles the logical coordinates correctly.
         for (let i = activeLayerIndex; i < layers.length; i++) {
             const layer = layers[i];
             if (layer.isVisible && layer.offscreenCanvas) {
                 const ctx = layer.offscreenCanvas.getContext('2d');
                 if (ctx) {
+                    // getPixelColor works on the offscreen canvas using its internal coordinates (0 to width/height)
                     const color = getPixelColor(ctx, logicalCoords.x, logicalCoords.y);
                     if (color) { dispatch({ type: 'SET_PRIMARY_COLOR', color }); return; }
                 }
@@ -252,11 +289,15 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx || canvasWidth <= 0 || canvasHeight <= 0) return;
+
+    const activeLayer = layers.find(l => l.id === activeLayerId);
     const activeIndex = layers.findIndex(l => l.id === activeLayerId);
+
     canvas.width = canvasWidth * zoomLevel;
     canvas.height = canvasHeight * zoomLevel;
     ctx.imageSmoothingEnabled = false;
-    const isActiveLayerLocked = (activeIndex !== -1 && layers[activeIndex]?.isLocked) ?? false;
+
+    const isActiveLayerLocked = (activeLayer?.isLocked) ?? false;
     if (isActiveLayerLocked && selectedTool !== 'eyedropper') {
         canvas.style.cursor = 'not-allowed';
     } else {
@@ -268,22 +309,30 @@ export function useCanvasDrawing({ canvasRef, containerRef }: UseCanvasDrawingPr
             default: canvas.style.cursor = 'default';
         }
     }
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawCheckerboard(ctx, canvas.width, canvas.height);
+
     if (activeIndex !== -1) {
         for (let i = layers.length - 1; i >= activeIndex; i--) {
             const layerToDraw = layers[i];
             if (layerToDraw && layerToDraw.isVisible && layerToDraw.offscreenCanvas) {
                 ctx.globalAlpha = (i === activeIndex) ? layerToDraw.opacity : 1.0;
+
+                // Draw the layer's offscreen canvas content directly.
+                // The rotation has already been applied to the offscreen canvas pixels.
                 ctx.drawImage(
                     layerToDraw.offscreenCanvas,
                     0, 0,
-                    canvas.width, canvas.height
+                    canvasWidth, canvasHeight, // Source dimensions from offscreen canvas
+                    0, 0,
+                    canvas.width, canvas.height // Destination dimensions on main canvas
                 );
             }
         }
         ctx.globalAlpha = 1.0;
     }
+
     if (showGrid && zoomLevel >= GRID_VISIBILITY_ZOOM_THRESHOLD) {
         ctx.strokeStyle = "rgba(128, 128, 128, 0.5)";
         ctx.lineWidth = 1;

@@ -1,7 +1,5 @@
 // src/components/Preview/PreviewPanel.tsx
-// For TS6133 on cosYaw, sinYaw: Removed them as they were unused in the user's provided version.
-// The user's version rotates each layer individually by objectYawRad.
-import React, { useRef, useEffect } from 'react'; // Keep React import
+import React, { useRef, useEffect } from 'react';
 import { useAppContext } from '../../state/AppContext';
 
 const ISO_CAMERA_PITCH_DEGREES = 45;
@@ -27,37 +25,72 @@ export const PreviewPanel: React.FC = () => {
     const footprintRadius = Math.sqrt(maxObjectX**2 + maxObjectZ**2);
     const requiredDim = (maxDim * previewScale) + (footprintRadius * previewScale * 2.5);
     const previewDim = requiredDim * paddingFactor;
+
     canvas.width = Math.max(1, previewDim);
     canvas.height = Math.max(1, previewDim);
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
+
+    ctx.save(); // Save initial context state
+
+    // Translate to the center of the preview canvas
     ctx.translate(canvas.width / 2, canvas.height / 2);
+
+    // Apply isometric camera pitch rotation
     const pitchRad = ISO_CAMERA_PITCH_DEGREES * Math.PI / 180;
     ctx.rotate(pitchRad);
     ctx.scale(Math.cos(pitchRad), Math.sin(pitchRad));
+
+    // Apply overall object yaw rotation
     const objectYawRad = previewRotation * Math.PI / 180;
-    // cosYaw and sinYaw were unused in this version of the logic
+    ctx.rotate(objectYawRad); // Apply object yaw here
+
+
     const numLayers = layers.length;
     for (let i = numLayers - 1; i >= 0; i--) {
       const layer = layers[i];
       if (!layer.isVisible || !layer.offscreenCanvas) continue;
+
       ctx.globalAlpha = layer.opacity;
+
       const depth = i;
       const objZ = depth * userZFactor * Z_SPACING_SENSITIVITY;
-      const objX = depth * userZFactor * Z_SPACING_SENSITIVITY;
+      const objX = depth * userZFactor * Z_SPACING_SENSITIVITY; // Assuming X offset is same as Z for isometric feel
+
       const posX = objX * previewScale;
       const posZ = objZ * previewScale;
-      ctx.save();
+
+      ctx.save(); // Save context state for this layer
+
+      // Translate for layer stacking offset
       ctx.translate(posX, posZ);
-      ctx.rotate(objectYawRad);
-      const w = canvasWidth * previewScale;
-      const h = canvasHeight * previewScale;
-      ctx.drawImage( layer.offscreenCanvas, -w / 2, -h / 2, w, h );
-      ctx.restore();
+
+      // --- Apply Layer's Individual Rotation ---
+      // We don't need to rotate the context here anymore, as the offscreen canvas
+      // already contains the rotated pixel data. We just need to draw it centered.
+      const layerCenterX = (canvasWidth * previewScale) / 2;
+      const layerCenterY = (canvasHeight * previewScale) / 2;
+
+       ctx.drawImage(
+          layer.offscreenCanvas,
+          0, // Source x
+          0, // Source y
+          canvasWidth, // Source width
+          canvasHeight, // Source height
+          -layerCenterX, // Destination x (relative to translated origin)
+          -layerCenterY, // Destination y (relative to translated origin)
+          canvasWidth * previewScale, // Destination width
+          canvasHeight * previewScale // Destination height
+      );
+      // --- End Apply Layer's Individual Rotation ---
+
+
+      ctx.restore(); // Restore context state for this layer
     }
-    ctx.restore();
+
+    ctx.restore(); // Restore initial context state
     ctx.globalAlpha = 1.0;
+
   }, [layers, canvasWidth, canvasHeight, previewOffset.y, previewRotation]);
 
   const handleZSpacingChange = (e: React.ChangeEvent<HTMLInputElement>) => {

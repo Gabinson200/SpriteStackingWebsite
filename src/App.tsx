@@ -32,9 +32,6 @@ interface SerializableAppStateForStorage extends Omit<AppState,
   brushSize: number;
 }
 
-// REMOVED Unused Interface: ProjectFileData (its definition is more relevant in Toolbar.tsx or as a shared type if needed elsewhere)
-// REMOVED Unused Interface: SerializableAppState (superseded by SerializableAppStateForStorage and SerializableAppStateForLoad)
-
 const LOCAL_STORAGE_KEY = 'spriteStackerState_v2_history_pitch_clipboard';
 
 function App() {

@@ -9,6 +9,7 @@ export interface LayerDataForHistory {
   isLocked: boolean;
   opacity: number;
   dataURL: string | undefined;
+  rotation: number; // Added rotation property
 }
 
 export interface Layer extends LayerDataForHistory {
@@ -27,7 +28,7 @@ export interface AppState {
   primaryColor: string;
   zoomLevel: number;
   previewOffset: { x: number; y: number };
-  previewRotation: number;
+  previewRotation: number; // This seems to be for the overall preview object rotation
   isColorPickerOpen: boolean;
   history: LayerDataForHistory[][];
   historyIndex: number;
@@ -41,13 +42,10 @@ export interface AppState {
 // This interface is used for the payload of the LOAD_STATE action.
 // It reflects the structure of data coming from a file or localStorage
 // before it's fully processed by the reducer into the AppState.
-// --- Added export keyword here ---
 export interface SerializableAppStateForLoad extends Omit<Partial<AppState>, 'layers' | 'history'> {
     layers?: LayerDataForHistory[]; // Layers are initially just data
     history?: LayerDataForHistory[][]; // History is also just data
 }
-// --- End export keyword addition ---
-
 
 export type LayerAction =
   | { type: 'INIT_PROJECT'; width: number; height: number; layerCount: number }
@@ -77,4 +75,6 @@ export type LayerAction =
   | { type: 'SHOW_NEW_PROJECT_MODAL' }
   | { type: 'TOGGLE_GRID' }
   | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null }
-  | { type: 'SET_BRUSH_SIZE'; size: number };
+  | { type: 'SET_BRUSH_SIZE'; size: number }
+  | { type: 'ROTATE_LEFT' } // Added Rotate Left action
+  | { type: 'ROTATE_RIGHT' }; // Added Rotate Right action
