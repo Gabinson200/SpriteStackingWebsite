@@ -1,6 +1,5 @@
 // src/components/Toolbar/Toolbar.tsx
-import React from 'react';
-// AppState is removed from this import line as ProjectFileData will be redefined
+import React, { useState, useRef, useEffect } from 'react'; // Added useState, useRef, useEffect
 import type { Tool, LayerDataForHistory, ClipboardLayerData, SerializableAppStateForLoad } from '../../state/types';
 import { useAppContext } from '../../state/AppContext';
 import { exportCanvasAsPNG } from '../../utils/fileUtils';
@@ -38,10 +37,12 @@ export const Toolbar: React.FC = () => {
   const {
     selectedTool, primaryColor, layers, zoomLevel, history, historyIndex,
     clipboard, activeLayerId, canvasWidth, canvasHeight,
-    // Removed cameraPitch, previewOffset, previewRotation from destructuring here
-    // as they are only used in handleSaveProject and will be accessed via `state.`
     showGrid, brushSize,
   } = state;
+
+  // State for the File dropdown visibility
+  const [isFileDropdownOpen, setIsFileDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null); // Ref for the dropdown container
 
   const setTool = (tool: Tool) => dispatch({ type: 'SET_SELECTED_TOOL', tool });
   const handleSetBrushSize = (size: number) => dispatch({ type: 'SET_BRUSH_SIZE', size });
@@ -57,6 +58,7 @@ export const Toolbar: React.FC = () => {
         }
         alert(`Exported ${layers.length} layer(s) as separate PNG files.`);
     } catch (error) { console.error("Export PNG failed:", error); alert("An error occurred during PNG export."); }
+    setIsFileDropdownOpen(false); // Close dropdown after action
   };
 
   const handleExportLvgl = () => {
@@ -65,18 +67,20 @@ export const Toolbar: React.FC = () => {
     if (visibleLayers.length === 0) { alert("No visible layers with content to export to LVGL."); return; }
     try {
         exportLayersToLvglH(visibleLayers, canvasWidth, canvasHeight, true, "sprite_stack_images");
-        alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`)} catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
+        alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`);
+    } catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
+    setIsFileDropdownOpen(false); // Close dropdown after action
   };
 
   const handleNewProject = () => {
     if (window.confirm("Are you sure you want to start a new project? Any unsaved changes will be lost.")) {
         dispatch({ type: 'SHOW_NEW_PROJECT_MODAL' });
     }
+    setIsFileDropdownOpen(false); // Close dropdown after action
   };
 
   const handleSaveProject = () => {
     try {
-        // Access cameraPitch, previewOffset, previewRotation directly from state object
         const projectData: ProjectFileData = {
             canvasWidth: state.canvasWidth,
             canvasHeight: state.canvasHeight,
@@ -85,9 +89,9 @@ export const Toolbar: React.FC = () => {
             selectedTool: state.selectedTool,
             primaryColor: state.primaryColor,
             zoomLevel: state.zoomLevel,
-            previewOffset: state.previewOffset,       // Used state.previewOffset
-            previewRotation: state.previewRotation,   // Used state.previewRotation
-            cameraPitch: state.cameraPitch,           // Used state.cameraPitch
+            previewOffset: state.previewOffset,
+            previewRotation: state.previewRotation,
+            cameraPitch: state.cameraPitch,
             history: state.history,
             historyIndex: state.historyIndex,
             clipboard: state.clipboard,
@@ -97,6 +101,7 @@ export const Toolbar: React.FC = () => {
         const jsonString = JSON.stringify(projectData, null, 2);
         downloadTextFile(jsonString, "sprite_stack_project.ssp", "application/json");
     } catch (error) { console.error("Error saving project:", error); alert("Failed to save project. See console for details."); }
+    setIsFileDropdownOpen(false); // Close dropdown after action
   };
 
   const handleLoadProject = async () => {
@@ -108,6 +113,7 @@ export const Toolbar: React.FC = () => {
             alert("Project loaded successfully!");
         }
     } catch (error) { console.error("Error loading project:", error); alert(`Failed to load project: ${error instanceof Error ? error.message : "Unknown error"}`);}
+    setIsFileDropdownOpen(false); // Close dropdown after action
   };
 
   const handleRotateLeft = () => {
@@ -117,6 +123,19 @@ export const Toolbar: React.FC = () => {
   const handleRotateRight = () => {
       dispatch({ type: 'ROTATE_RIGHT' });
   };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsFileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [dropdownRef]);
 
 
   const ToolButton: React.FC<{ tool: Tool; label: string; currentTool: Tool }> = ({ tool, label, currentTool }) => (
@@ -138,16 +157,35 @@ export const Toolbar: React.FC = () => {
   const canCopy = !!activeLayerId;
   const canCut = !!activeLayerId && layers.length > 1; // Can't cut the last layer
   const canPaste = !!clipboard;
-  const canRotate = !!activeLayerId && layers.find(l => l.id === activeLayerId)?.offscreenCanvas !== null; // Can only rotate if active layer exists and has a canvas
+  const activeLayer = layers.find(l => l.id === activeLayerId);
+  const canRotate = !!activeLayerId && activeLayer?.offscreenCanvas !== null; // Can only rotate if active layer exists and has a canvas
+  const canExportLvgl = layers.filter(l => l.isVisible && l.offscreenCanvas).length > 0;
+
 
   return (
     <div className="bg-gray-100 dark:bg-gray-800 p-2 shadow-md flex items-center space-x-3 border-b border-gray-300 dark:border-gray-700 flex-wrap">
-      {/* File Operations Group */}
-      <div className="flex space-x-1 border-r border-gray-300 dark:border-gray-600 pr-2 mr-2">
-        <button onClick={handleNewProject} className="px-3 py-1 border rounded text-sm bg-blue-500 hover:bg-blue-600 text-white border-blue-600" title="New Project">New</button>
-        <button onClick={handleSaveProject} className="px-3 py-1 border rounded text-sm bg-green-500 hover:bg-green-600 text-white border-green-600" title="Save Project As...">Save</button>
-        <button onClick={handleLoadProject} className="px-3 py-1 border rounded text-sm bg-yellow-500 hover:bg-yellow-600 text-black border-yellow-600" title="Load Project...">Load</button>
+
+      {/* File Dropdown */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setIsFileDropdownOpen(!isFileDropdownOpen)}
+          className="px-3 py-1 border rounded text-sm bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 border-gray-300 dark:border-gray-500 transition duration-150 ease-in-out"
+          title="File Operations"
+        >
+          File ▼
+        </button>
+        {isFileDropdownOpen && (
+          <div className="absolute top-full left-0 mt-1 w-40 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-10 flex flex-col py-1">
+            <button onClick={handleNewProject} className="text-left px-3 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">New</button>
+            <button onClick={handleSaveProject} className="text-left px-3 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">Save</button>
+            <button onClick={handleLoadProject} className="text-left px-3 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">Load</button>
+            <hr className="my-1 border-gray-200 dark:border-gray-600" />
+            <button onClick={handleExportPng} className="text-left px-3 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">Export PNGs</button>
+            <button onClick={handleExportLvgl} disabled={!canExportLvgl} className={`text-left px-3 py-1 text-sm transition-colors ${!canExportLvgl ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'}`}>Export LVGL</button>
+          </div>
+        )}
       </div>
+
 
       {/* Tools */}
       <div className="flex space-x-1">
@@ -212,12 +250,6 @@ export const Toolbar: React.FC = () => {
        <div className="flex items-center space-x-1">
          <span className="text-sm px-2 tabular-nums" title="Zoom Level (use scroll wheel to change)"> Zoom: {zoomLevel.toFixed(2)}x </span>
        </div>
-
-      {/* Export Buttons Group (PNG and LVGL) */}
-       <div className="flex space-x-1">
-        <button onClick={handleExportPng} className="px-3 py-1 border rounded bg-green-500 hover:bg-green-600 text-white border-green-600 transition duration-150 ease-in-out text-sm" title="Export all layers as individual PNGs"> Export PNGs </button>
-        <button onClick={handleExportLvgl} disabled={!layers || layers.filter(l => l.isVisible && l.offscreenCanvas).length === 0} className={`px-3 py-1 border rounded text-sm transition-colors ${ (!layers || layers.filter(l => l.isVisible && l.offscreenCanvas).length === 0) ? 'bg-gray-400 dark:bg-gray-600 text-gray-700 dark:text-gray-400 cursor-not-allowed border-gray-300 dark:border-gray-500' : 'bg-teal-500 hover:bg-teal-600 text-white border-teal-600'}`} title="Export visible layers to LVGL .h file"> Export LVGL </button>
-      </div>
     </div>
   );
 };

@@ -41,11 +41,6 @@ export const PreviewPanel: React.FC = () => {
     ctx.rotate(pitchRad);
     ctx.scale(Math.cos(pitchRad), Math.sin(pitchRad));
 
-    // Apply overall object yaw rotation
-    const objectYawRad = previewRotation * Math.PI / 180;
-    ctx.rotate(objectYawRad); // Apply object yaw here
-
-
     const numLayers = layers.length;
     for (let i = numLayers - 1; i >= 0; i--) {
       const layer = layers[i];
@@ -64,6 +59,10 @@ export const PreviewPanel: React.FC = () => {
 
       // Translate for layer stacking offset
       ctx.translate(posX, posZ);
+
+      // Apply overall object yaw rotation to each layer individually
+      const objectYawRad = previewRotation * Math.PI / 180;
+      ctx.rotate(objectYawRad);
 
       // --- Apply Layer's Individual Rotation ---
       // We don't need to rotate the context here anymore, as the offscreen canvas
