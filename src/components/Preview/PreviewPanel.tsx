@@ -5,7 +5,7 @@ import React, { useRef, useEffect } from 'react'; // Keep React import
 import { useAppContext } from '../../state/AppContext';
 
 const ISO_CAMERA_PITCH_DEGREES = 45;
-const Z_SPACING_SENSITIVITY = 10;
+const Z_SPACING_SENSITIVITY = 5;
 
 export const PreviewPanel: React.FC = () => {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,14 +18,14 @@ export const PreviewPanel: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx || canvasWidth <= 0 || canvasHeight <= 0) return;
 
-    const previewScale = 5;
-    const paddingFactor = 1;
+    const previewScale = 18;
+    const paddingFactor = 0.8;
     const maxDim = Math.max(canvasWidth, canvasHeight);
     const userZFactor = previewOffset.y;
     const maxObjectX = Math.abs(userZFactor) * Z_SPACING_SENSITIVITY * layers.length;
     const maxObjectZ = Math.abs(userZFactor) * Z_SPACING_SENSITIVITY * layers.length;
     const footprintRadius = Math.sqrt(maxObjectX**2 + maxObjectZ**2);
-    const requiredDim = (maxDim * previewScale) + (footprintRadius * previewScale * 2);
+    const requiredDim = (maxDim * previewScale) + (footprintRadius * previewScale * 2.5);
     const previewDim = requiredDim * paddingFactor;
     canvas.width = Math.max(1, previewDim);
     canvas.height = Math.max(1, previewDim);
@@ -75,8 +75,8 @@ export const PreviewPanel: React.FC = () => {
       </div>
       <div className="space-y-2 text-sm">
         <div>
-          <label htmlFor="offsetY">Z Spacing: {previewOffset.y.toFixed(1)}</label>
-          <input type="range" id="offsetY" min="0" max="1" step="0.05" value={previewOffset.y} onChange={handleZSpacingChange} className="w-full h-1 cursor-pointer"/>
+          <label htmlFor="offsetY">Z Spacing: {previewOffset.y.toFixed(2)}</label>
+          <input type="range" id="offsetY" min="0.0" max="1.0" step="0.02" value={previewOffset.y} onChange={handleZSpacingChange} className="w-full h-1 cursor-pointer"/>
         </div>
         <div>
           <label htmlFor="rotation">Object Yaw: {previewRotation.toFixed(0)}°</label>

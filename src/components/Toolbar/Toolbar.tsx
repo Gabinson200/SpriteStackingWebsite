@@ -64,7 +64,7 @@ export const Toolbar: React.FC = () => {
     const visibleLayers = layers.filter(layer => layer.isVisible && layer.offscreenCanvas);
     if (visibleLayers.length === 0) { alert("No visible layers with content to export to LVGL."); return; }
     try {
-        exportLayersToLvglH(visibleLayers, canvasWidth, canvasHeight, false, "sprite_stack_images");
+        exportLayersToLvglH(visibleLayers, canvasWidth, canvasHeight, true, "sprite_stack_images");
         alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`);
     } catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
   };

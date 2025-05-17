@@ -25,14 +25,16 @@ function sanitizeLayerNameForC(name: string): string {
 }
 
 /**
- * Converts RGBA8888 pixel data to LVGL 16-bit True Color with Alpha format (RGB565 + A8).
- * Each pixel becomes 3 bytes: [ColorByte1, ColorByte2, AlphaByte].
+ * Converts RGBA8888 pixel data to LVGL 16-bit True Color with Alpha format.
+ * Output byte order depends on lvColor16Swap to match LV_COLOR_16_SWAP in lv_conf.h.
  * @param r Red component (0-255)
  * @param g Green component (0-255)
  * @param b Blue component (0-255)
  * @param a Alpha component (0-255)
- * @param swapColorBytes If true, the two 16-bit color bytes are swapped (for LV_COLOR_16_SWAP).
- * @returns Array of 3 numbers (bytes) [C1, C2, A].
+ * @param lvColor16Swap Corresponds to LV_COLOR_16_SWAP in lv_conf.h.
+ * If false (LV_COLOR_16_SWAP = 0), Byte0 is GGG BBBBB, Byte1 is RRRRR GGG.
+ * If true (LV_COLOR_16_SWAP = 1), Byte0 is RRRRR GGG, Byte1 is GGG BBBBB.
+ * @returns Array of 3 numbers (bytes) [Byte0, Byte1, AlphaByte].
  */
 function rgbaToLvglTrueColorAlpha16(
     r: number, g: number, b: number, a: number,
