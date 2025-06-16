@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react'; // Added useState, u
 import type { Tool, LayerDataForHistory, ClipboardLayerData, SerializableAppStateForLoad } from '../../state/types';
 import { useAppContext } from '../../state/AppContext';
 import { exportCanvasAsPNG } from '../../utils/fileUtils';
-import { exportLayersToLvglH } from '../../utils/lvglExporter';
+import { exportLayersToLvglH, exportLayersToLvglH_NoAlpha } from '../../utils/lvglExporter';
 import { downloadTextFile, openJsonFile } from '../../utils/fileUtils';
 import { serializeLayersForHistory } from '../../hooks/useLayerManager';
 
@@ -70,6 +70,19 @@ export const Toolbar: React.FC = () => {
         alert(`LVGL .h file export initiated for ${visibleLayers.length} layer(s).`);
     } catch (error) { console.error("Export LVGL failed:", error); alert("An error occurred during LVGL export. Check console for details.");}
     setIsFileDropdownOpen(false); // Close dropdown after action
+  };
+
+  // --- Handler for the new No-Alpha export ---
+  const handleExportLvglNoAlpha = () => {
+    if (!layers || layers.length === 0) { alert("No layers to export to LVGL."); return; }
+    const visibleLayers = layers.filter(layer => layer.isVisible && layer.offscreenCanvas);
+    if (visibleLayers.length === 0) { alert("No visible layers to export."); return; }
+    try {
+        // Assuming your project has LV_COLOR_16_SWAP set to 1, passing `true`
+        exportLayersToLvglH_NoAlpha(visibleLayers, canvasWidth, canvasHeight, true, "sprite_stack_images");
+        alert(`LVGL .h file (No Alpha) export initiated for ${visibleLayers.length} layer(s).`);
+    } catch (error) { console.error("Export LVGL (No Alpha) failed:", error); alert("An error occurred during LVGL (No Alpha) export.");}
+    setIsFileDropdownOpen(false);
   };
 
   const handleNewProject = () => {
@@ -182,6 +195,8 @@ export const Toolbar: React.FC = () => {
             <hr className="my-1 border-gray-200 dark:border-gray-600" />
             <button onClick={handleExportPng} className="text-left px-3 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">Export PNGs</button>
             <button onClick={handleExportLvgl} disabled={!canExportLvgl} className={`text-left px-3 py-1 text-sm transition-colors ${!canExportLvgl ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'}`}>Export LVGL</button>
+            <button onClick={handleExportLvglNoAlpha} disabled={!canExportLvgl} className={`text-left px-3 py-1 text-sm transition-colors ${!canExportLvgl ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'}`}>Export LVGL (No Alpha)</button>
+
           </div>
         )}
       </div>
