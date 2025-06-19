@@ -37,14 +37,43 @@ export const Toolbar: React.FC = () => {
   const {
     selectedTool, primaryColor, layers, zoomLevel, history, historyIndex,
     clipboard, activeLayerId, canvasWidth, canvasHeight,
-    showGrid, brushSize,
+    showGrid, brushSize, selection, floatingSelection
   } = state;
 
   // State for the File dropdown visibility
   const [isFileDropdownOpen, setIsFileDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null); // Ref for the dropdown container
 
-  const setTool = (tool: Tool) => dispatch({ type: 'SET_SELECTED_TOOL', tool });
+  const setTool = (tool: Tool) => {
+    // When switching away from selection tool, stamp down any floating selection
+    if (state.floatingSelection) {
+        if (window.confirm("You have a selection that has not been placed. Do you want to stamp it onto the current layer before switching tools?")) {
+            dispatch({ type: 'STAMP_FLOATING_SELECTION' });
+        } else {
+            dispatch({ type: 'CLEAR_FLOATING_SELECTION' });
+        }
+    }
+    dispatch({ type: 'SET_SELECTED_TOOL', tool });
+    dispatch({ type: 'SET_SELECTION', rect: null });
+  };
+
+  // --- Handlers for Selection Actions ---
+  const handleCutSelection = () => {
+    if (state.selection) {
+        dispatch({ type: 'LIFT_SELECTION', clearOriginal: true });
+    }
+  };
+  const handleCopySelection = () => {
+     if (state.selection) {
+        dispatch({ type: 'LIFT_SELECTION', clearOriginal: false });
+    }
+  };
+  const handleStampSelection = () => {
+      if (state.floatingSelection) {
+          dispatch({ type: 'STAMP_FLOATING_SELECTION' });
+      }
+  };
+
   const handleSetBrushSize = (size: number) => dispatch({ type: 'SET_BRUSH_SIZE', size });
 
   const handleExportPng = async () => {
@@ -173,7 +202,9 @@ export const Toolbar: React.FC = () => {
   const activeLayer = layers.find(l => l.id === activeLayerId);
   const canRotate = !!activeLayerId && activeLayer?.offscreenCanvas !== null; // Can only rotate if active layer exists and has a canvas
   const canExportLvgl = layers.filter(l => l.isVisible && l.offscreenCanvas).length > 0;
-
+  const canSelect = !!state.activeLayerId;
+  const canCutCopy = !!state.selection;
+  const canStamp = !!state.floatingSelection;
 
   return (
     <div className="bg-gray-100 dark:bg-gray-800 p-2 shadow-md flex items-center space-x-3 border-b border-gray-300 dark:border-gray-700 flex-wrap">
@@ -208,6 +239,8 @@ export const Toolbar: React.FC = () => {
          <ToolButton tool="eraser" label="Eraser" currentTool={selectedTool} />
          <ToolButton tool="eyedropper" label="Eyedropper" currentTool={selectedTool} />
          <ToolButton tool="fill" label="Fill" currentTool={selectedTool} />
+         <ToolButton tool="selection" label="Select" currentTool={selectedTool} />
+
       </div>
 
       {/* Brush Size Selector */}
@@ -255,6 +288,15 @@ export const Toolbar: React.FC = () => {
         <input type="checkbox" id="showGridCheckbox" checked={showGrid} onChange={() => dispatch({ type: 'TOGGLE_GRID' })} className="form-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-indigo-500"/>
         <label htmlFor="showGridCheckbox" className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"> Show Grid </label>
       </div>
+
+      {/* --- Contextual Selection Toolbar --- */}
+      {selectedTool === 'selection' && (
+        <div className="flex items-center space-x-1 border-l border-gray-300 dark:border-gray-600 pl-2 ml-2">
+            <span className="text-xs text-gray-600 dark:text-gray-400 mr-1">Selection:</span>
+            <button onClick={handleCopySelection} disabled={!canCutCopy} className={`px-2 py-0.5 border rounded text-xs ...`}>Copy</button>
+            <button onClick={handleCutSelection} disabled={!canCutCopy} className={`px-2 py-0.5 border rounded text-xs ...`}>Cut</button>
+        </div>
+      )}
 
       {/* Color Preview & Picker Trigger */}
       <div className="flex items-center space-x-2 ml-auto">

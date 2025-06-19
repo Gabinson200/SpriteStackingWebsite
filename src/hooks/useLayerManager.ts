@@ -39,6 +39,8 @@ export const initialAppState: AppState = {
   showGrid: true,
   cursorCoords: null,
   brushSize: DEFAULT_BRUSH_SIZE,
+  selection: null,
+  floatingSelection: null,
 };
 
 const pushToHistory = (currentState: AppState, newLayersSnapshot: LayerDataForHistory[]): Pick<AppState, 'history' | 'historyIndex'> => {
@@ -139,6 +141,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
             showGrid: loadedState.showGrid ?? initialAppState.showGrid,
             brushSize: loadedState.brushSize ?? initialAppState.brushSize,
             cursorCoords: null,
+            selection: loadedState.selection ?? null,
         };
     }
     case 'ADD_LAYER': {
@@ -185,6 +188,8 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         layers: state.layers.map(layer =>
           layer.id === action.id ? { ...layer, offscreenCanvas: action.canvas, dataURL: action.dataURL } : layer
         ),
+        selection: null, // Reset selection on canvas update
+        floatingSelection: null, // Reset floating selection on canvas update
       };
     }
     case 'SET_LAYER_VISIBILITY':
@@ -283,7 +288,7 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newLayers = [ ...state.layers.slice(0, insertAtIndex), newPastedLayer, ...state.layers.slice(insertAtIndex) ];
         return { ...state, ...historyUpdate, layers: newLayers, activeLayerId: newLayerId };
     }
-    case 'SELECT_LAYER': return { ...state, activeLayerId: action.id };
+    case 'SELECT_LAYER': return { ...state, activeLayerId: action.id, selection: null, floatingSelection: null };
     case 'SET_PRIMARY_COLOR': return { ...state, primaryColor: action.color };
     case 'SET_SELECTED_TOOL': return { ...state, selectedTool: action.tool };
     case 'SET_ZOOM_LEVEL': return { ...state, zoomLevel: action.level };
@@ -319,6 +324,91 @@ export const layerReducer: Reducer<AppState, LayerAction> = (state, action): App
         const newBrushSize = Math.max(1, Math.min(action.size, 32));
         return { ...state, brushSize: newBrushSize };
 
+    case 'SET_SELECTION':
+        // When setting a new selection, clear any floating selection data
+        return { ...state, selection: action.rect, floatingSelection: null };
+
+    // --- Handle Floating Selection Actions ---
+    case 'LIFT_SELECTION': {
+        if (!state.selection || !state.activeLayerId) return state;
+
+        const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+        if (!activeLayer?.offscreenCanvas) return state;
+
+        const ctx = activeLayer.offscreenCanvas.getContext('2d');
+        if (!ctx) return state;
+
+        // 1. Get the pixel data from the selected area
+        const { x, y, width, height } = state.selection;
+        const imageData = ctx.getImageData(x, y, width, height);
+
+        // 2. Create the floating selection object
+        const newFloatingSelection = { imageData, x, y, initialPosition: { x, y } };
+
+        if (action.clearOriginal) { // This is a "cut" or "move" operation
+            // 3a. Clear the area on the original canvas and push to history
+            const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+            ctx.clearRect(x, y, width, height);
+            const dataURL = activeLayer.offscreenCanvas.toDataURL(); // Get updated dataURL
+            return {
+                ...state,
+                ...historyUpdate,
+                floatingSelection: newFloatingSelection,
+                selection: null, // Clear the "marching ants" selection rectangle
+                layers: state.layers.map(l => l.id === activeLayer.id ? { ...l, dataURL } : l),
+            };
+        } else { // This is a "copy" operation
+            // 3b. Don't modify the original canvas, just set the floating selection
+            return {
+                ...state,
+                floatingSelection: newFloatingSelection,
+                selection: null, // Clear the "marching ants" selection rectangle
+            };
+        }
+    }
+
+    case 'STAMP_FLOATING_SELECTION': {
+        if (!state.floatingSelection || !state.activeLayerId) return state;
+
+        const activeLayer = state.layers.find(l => l.id === state.activeLayerId);
+        if (!activeLayer?.offscreenCanvas) return state;
+
+        const ctx = activeLayer.offscreenCanvas.getContext('2d');
+        if (!ctx) return state;
+
+        // Take a history snapshot before stamping
+        const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));
+
+        // Draw the floating image data onto the active layer
+        const { imageData, x, y } = state.floatingSelection;
+        ctx.putImageData(imageData, x, y);
+
+        const dataURL = activeLayer.offscreenCanvas.toDataURL();
+
+        return {
+            ...state,
+            ...historyUpdate,
+            floatingSelection: null, // Clear floating selection after stamping
+            layers: state.layers.map(l => l.id === activeLayer.id ? { ...l, dataURL } : l),
+        };
+    }
+
+    case 'MOVE_FLOATING_SELECTION': {
+        if (!state.floatingSelection) return state;
+        return {
+            ...state,
+            floatingSelection: {
+                ...state.floatingSelection,
+                x: action.newPosition.x,
+                y: action.newPosition.y,
+            },
+        };
+    }
+
+    case 'CLEAR_FLOATING_SELECTION': {
+        return { ...state, floatingSelection: null };
+    }
+    // ---
     case 'ROTATE_LEFT': {
         if (!state.activeLayerId) return state;
         const historyUpdate = pushToHistory(state, serializeLayersForHistory(state.layers));

@@ -1,6 +1,7 @@
 // src/state/types.ts
 
-export type Tool = 'pencil' | 'eraser' | 'eyedropper' | 'fill';
+// Add 'selection' to the Tool type
+export type Tool = 'pencil' | 'eraser' | 'eyedropper' | 'fill' | 'selection';
 
 export interface LayerDataForHistory {
   id: string;
@@ -9,7 +10,7 @@ export interface LayerDataForHistory {
   isLocked: boolean;
   opacity: number;
   dataURL: string | undefined;
-  rotation: number; // Added rotation property
+  rotation: number;
 }
 
 export interface Layer extends LayerDataForHistory {
@@ -17,6 +18,21 @@ export interface Layer extends LayerDataForHistory {
 }
 
 export type ClipboardLayerData = Omit<LayerDataForHistory, 'id'> & { originalId?: string };
+
+// Define the shape of the selection rectangle
+export interface SelectionRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface FloatingSelection {
+    imageData: ImageData; // The actual pixel data
+    x: number;            // Top-left position on the logical canvas
+    y: number;
+    initialPosition: { x: number; y: number }; // Where the selection was first clicked
+}
 
 export interface AppState {
   isInitialized: boolean;
@@ -28,7 +44,7 @@ export interface AppState {
   primaryColor: string;
   zoomLevel: number;
   previewOffset: { x: number; y: number };
-  previewRotation: number; // This seems to be for the overall preview object rotation
+  previewRotation: number;
   isColorPickerOpen: boolean;
   history: LayerDataForHistory[][];
   historyIndex: number;
@@ -37,19 +53,18 @@ export interface AppState {
   showGrid: boolean;
   cursorCoords: { x: number; y: number } | null;
   brushSize: number;
+  selection: SelectionRect | null; // The active, finalized selection
+  floatingSelection: FloatingSelection | null; // The selection being dragged or transformed
 }
 
-// This interface is used for the payload of the LOAD_STATE action.
-// It reflects the structure of data coming from a file or localStorage
-// before it's fully processed by the reducer into the AppState.
 export interface SerializableAppStateForLoad extends Omit<Partial<AppState>, 'layers' | 'history'> {
-    layers?: LayerDataForHistory[]; // Layers are initially just data
-    history?: LayerDataForHistory[][]; // History is also just data
+    layers?: LayerDataForHistory[];
+    history?: LayerDataForHistory[][];
 }
 
 export type LayerAction =
   | { type: 'INIT_PROJECT'; width: number; height: number; layerCount: number }
-  | { type: 'LOAD_STATE'; state: SerializableAppStateForLoad } // Use the specific type here
+  | { type: 'LOAD_STATE'; state: SerializableAppStateForLoad }
   | { type: 'ADD_LAYER' }
   | { type: 'DELETE_LAYER'; id: string }
   | { type: 'SELECT_LAYER'; id: string }
@@ -76,5 +91,11 @@ export type LayerAction =
   | { type: 'TOGGLE_GRID' }
   | { type: 'SET_CURSOR_COORDS'; coords: { x: number; y: number } | null }
   | { type: 'SET_BRUSH_SIZE'; size: number }
-  | { type: 'ROTATE_LEFT' } // Added Rotate Left action
-  | { type: 'ROTATE_RIGHT' }; // Added Rotate Right action
+  | { type: 'SET_LAYER_ROTATION'; layerId: string; rotation: number }
+  | { type: 'ROTATE_ACTIVE_LAYER_LEFT' }
+  | { type: 'ROTATE_ACTIVE_LAYER_RIGHT' }
+  | { type: 'SET_SELECTION'; rect: SelectionRect | null }
+  | { type: 'LIFT_SELECTION'; clearOriginal: boolean } // clearOriginal = true for "cut", false for "copy"
+  | { type: 'STAMP_FLOATING_SELECTION' }
+  | { type: 'MOVE_FLOATING_SELECTION'; newPosition: { x: number; y: number } }
+  | { type: 'CLEAR_FLOATING_SELECTION' };
